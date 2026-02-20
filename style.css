@@ -89,6 +89,28 @@ body {
 .btn-clear { color: var(--red); }
 .btn-clear:hover { background: color-mix(in srgb, var(--red) 12%, transparent); border-color: var(--red); color: var(--red); }
 
+/* ── Prefix input ──────────────────────────────────────────────── */
+.prefix-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin-left: 4px;
+  user-select: none;
+}
+.prefix-input {
+  width: 82px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-family: inherit;
+  padding: 4px 8px;
+  outline: none;
+  transition: border-color 0.12s;
+}
+.prefix-input:focus { border-color: var(--accent); }
+
 .btn kbd {
   display: inline-block;
   background: var(--bg0);

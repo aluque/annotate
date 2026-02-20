@@ -46,11 +46,13 @@ const canvasArea = document.getElementById('canvas-area');
 // ── Utilities ──────────────────────────────────────────────────────────────
 function uid() { return crypto.randomUUID(); }
 
+const DEFAULT_PREFIX = { point: 'Point', line: 'Line', rect: 'Rectangle' };
+
 function nextName(type) {
   counters[type]++;
-  const n     = String(counters[type]).padStart(3, '0');
-  const label = type === 'rect' ? 'Rectangle' : type.charAt(0).toUpperCase() + type.slice(1);
-  return `${label}${n}`;
+  const n      = String(counters[type]).padStart(3, '0');
+  const prefix = document.getElementById('prefix-input').value.trim() || DEFAULT_PREFIX[type];
+  return `${prefix}${n}`;
 }
 
 function esc(s) {
@@ -79,6 +81,10 @@ function setMode(m) {
 
   const modeLabel = { select: 'Select', point: 'Add Point', line: 'Add Line', rect: 'Add Rectangle' }[m] || m;
   document.getElementById('status-mode').textContent = modeLabel;
+
+  if (DEFAULT_PREFIX[m]) {
+    document.getElementById('prefix-input').value = DEFAULT_PREFIX[m];
+  }
 
   const hints = {
     select: 'Click an annotation to select it',
