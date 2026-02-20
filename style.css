@@ -86,6 +86,8 @@ body {
 .btn-import:hover { background: color-mix(in srgb, var(--green) 12%, transparent); border-color: var(--green); color: var(--green); }
 .btn-export { color: var(--accent-light); }
 .btn-export:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); border-color: var(--accent); color: var(--accent-light); }
+.btn-clear { color: var(--red); }
+.btn-clear:hover { background: color-mix(in srgb, var(--red) 12%, transparent); border-color: var(--red); color: var(--red); }
 
 .btn kbd {
   display: inline-block;

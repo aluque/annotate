@@ -540,6 +540,16 @@ function refreshList() {
   }
 }
 
+// ── Clear all ──────────────────────────────────────────────────────────────
+function clearAnnotations() {
+  if (annotations.length === 0) return;
+  if (!confirm(`Remove all ${annotations.length} annotation${annotations.length > 1 ? 's' : ''}?`)) return;
+  annotations = [];
+  selectedId  = null;
+  refreshList();
+  redraw();
+}
+
 // ── JSON export / import ───────────────────────────────────────────────────
 function downloadJSON() {
   const payload = {
