@@ -105,7 +105,7 @@ function openImage(file) {
     imgH = img.naturalHeight;
     fitCanvas();
     dropZone.style.display   = 'none';
-    canvasWrap.style.display = 'inline-block';
+    canvasWrap.style.display = 'block';
     redraw();
     URL.revokeObjectURL(url);
   };
@@ -120,6 +120,17 @@ function fitCanvas() {
   scale    = Math.min(1, minScale);
   mainCanvas.width  = Math.round(imgW * scale);
   mainCanvas.height = Math.round(imgH * scale);
+  updateCanvasPadding();
+}
+
+// Keep the canvas centred via margin when it is smaller than the viewport,
+// and use a fixed minimum gap when it is larger. Reading canvasWrap.offsetLeft
+// after this call gives the exact value needed for scroll calculations.
+function updateCanvasPadding() {
+  const pad = 20;
+  const mx = Math.max(pad, Math.round((canvasArea.clientWidth  - mainCanvas.width)  / 2));
+  const my = Math.max(pad, Math.round((canvasArea.clientHeight - mainCanvas.height) / 2));
+  canvasWrap.style.margin = `${my}px ${mx}px`;
 }
 
 // ── Annotation CRUD ────────────────────────────────────────────────────────
@@ -303,16 +314,15 @@ mainCanvas.addEventListener('wheel', e => {
   scale = newScale;
   mainCanvas.width  = Math.round(imgW * scale);
   mainCanvas.height = Math.round(imgH * scale);
+  updateCanvasPadding();
   redraw();
 
   // Scroll so the image point under the cursor stays fixed.
-  // When the canvas is smaller than the area, flexbox centres it,
-  // adding an implicit offset that must be accounted for.
-  const areaRect   = canvasArea.getBoundingClientRect();
-  const wrapOffsetX = Math.max(0, (canvasArea.clientWidth  - mainCanvas.width)  / 2);
-  const wrapOffsetY = Math.max(0, (canvasArea.clientHeight - mainCanvas.height) / 2);
-  canvasArea.scrollLeft = wrapOffsetX + imgX * scale - (e.clientX - areaRect.left);
-  canvasArea.scrollTop  = wrapOffsetY + imgY * scale - (e.clientY - areaRect.top);
+  // updateCanvasPadding() sets canvasWrap's margin, so offsetLeft/offsetTop
+  // are the exact scroll-space offsets — no estimation needed.
+  const areaRect = canvasArea.getBoundingClientRect();
+  canvasArea.scrollLeft = canvasWrap.offsetLeft + imgX * scale - (e.clientX - areaRect.left);
+  canvasArea.scrollTop  = canvasWrap.offsetTop  + imgY * scale - (e.clientY - areaRect.top);
 }, { passive: false });
 
 // ── Main canvas render ─────────────────────────────────────────────────────
