@@ -13,6 +13,7 @@ let selectedId   = null;
 let mode         = 'select';
 let sourceImage  = null;        // HTMLImageElement
 let imageBaseName = 'annotations'; // derived from the loaded image filename
+let imageFileName = '';            // full original filename including extension
 let imgW = 0, imgH = 0;
 let scale = 1;                  // canvas px / image px
 let minScale = 0.1;             // updated by fitCanvas()
@@ -94,6 +95,7 @@ function setMode(m) {
 // ── Image loading ──────────────────────────────────────────────────────────
 function openImage(file) {
   if (!file || !file.type.startsWith('image/')) return;
+  imageFileName = file.name;
   imageBaseName = file.name.replace(/\.[^.]+$/, ''); // strip extension
   const url = URL.createObjectURL(file);
   const img = new Image();
@@ -541,6 +543,10 @@ function refreshList() {
 // ── JSON export / import ───────────────────────────────────────────────────
 function downloadJSON() {
   const payload = {
+    metadata: {
+      image:    imageFileName,
+      exported: new Date().toISOString(),
+    },
     annotations: annotations.map(a => ({
       type:   a.type,
       name:   a.name,
