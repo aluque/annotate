@@ -32,12 +32,23 @@ let panStart  = null;           // {mouseX, mouseY, scrollLeft, scrollTop}
 // Name counters
 const counters = { point: 0, line: 0, rect: 0 };
 
+// ── Tags state ─────────────────────────────────────────────────────────────
+const TAG_COLORS = [
+  '#f87171', '#fb923c', '#facc15', '#4ade80',
+  '#34d399', '#60a5fa', '#a78bfa', '#f472b6',
+];
+let tags               = [];   // [{id, name, color}]
+let activeTags         = new Set(); // IDs of tags applied to the next new annotation
+let tagAnchorId        = null;     // anchor for shift-click range selection
+let expandedAnnotationId = null;   // annotation whose tag editor is open
+
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const mainCanvas = document.getElementById('main-canvas');
 const mainCtx    = mainCanvas.getContext('2d');
 const zoomCanvas = document.getElementById('zoom-canvas');
 const zoomCtx    = zoomCanvas.getContext('2d');
 const annList    = document.getElementById('annotation-list');
+const tagsList   = document.getElementById('tags-list');
 const coordsHud  = document.getElementById('coords-hud');
 const dropZone   = document.getElementById('drop-zone');
 const canvasWrap = document.getElementById('canvas-wrapper');
@@ -141,6 +152,7 @@ function updateCanvasPadding() {
 
 // ── Annotation CRUD ────────────────────────────────────────────────────────
 function addAnnotation(ann) {
+  ann.tags = [...activeTags];
   annotations.push(ann);
   selectedId = ann.id;
   refreshList();
@@ -151,6 +163,7 @@ function addAnnotation(ann) {
 function deleteAnnotation(id) {
   annotations = annotations.filter(a => a.id !== id);
   if (selectedId === id) selectedId = null;
+  if (expandedAnnotationId === id) expandedAnnotationId = null;
   refreshList();
   redraw();
 }
@@ -511,11 +524,22 @@ const TYPE_ICONS = {
     xmlns="http://www.w3.org/2000/svg"><rect x="3" y="5" width="18" height="14" rx="1.5"/></svg>`,
 };
 
+function getTagDots(annTagIds) {
+  if (!annTagIds || annTagIds.length === 0) return '';
+  const dots = annTagIds
+    .map(id => tags.find(t => t.id === id))
+    .filter(Boolean)
+    .map(t => `<span class="ann-tag-dot" style="background:${t.color}" title="${esc(t.name)}"></span>`)
+    .join('');
+  return dots ? `<span class="ann-tag-dots">${dots}</span>` : '';
+}
+
 function refreshList() {
   document.getElementById('ann-count').textContent = annotations.length;
   annList.innerHTML = '';
 
   for (const ann of annotations) {
+    const isExpanded = ann.id === expandedAnnotationId;
     const item = document.createElement('div');
     item.className = 'ann-item' + (ann.id === selectedId ? ' selected' : '');
     item.dataset.id = ann.id;
@@ -523,14 +547,74 @@ function refreshList() {
       ${TYPE_ICONS[ann.type] || ''}
       <input class="ann-name-input" type="text" value="${esc(ann.name)}"
         data-id="${ann.id}" spellcheck="false">
+      ${getTagDots(ann.tags)}
+      <button class="tag-edit-btn${isExpanded ? ' active' : ''}" title="Edit tags">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/>
+          <line x1="7" y1="7" x2="7.01" y2="7"/>
+        </svg>
+      </button>
       <button class="ann-del-btn" data-id="${ann.id}" title="Delete">×</button>
     `;
 
+    // Expanded tag editor
+    if (isExpanded) {
+      const editor = document.createElement('div');
+      editor.className = 'ann-tag-editor';
+      const annTagSet = new Set(ann.tags || []);
+
+      if (tags.length === 0) {
+        const msg = document.createElement('span');
+        msg.style.cssText = 'font-size:11.5px;color:var(--text-dim)';
+        msg.textContent = 'No tags defined';
+        editor.appendChild(msg);
+      } else {
+        for (const tag of tags) {
+          const chip = document.createElement('span');
+          chip.className = 'tag-editor-chip' + (annTagSet.has(tag.id) ? ' has-tag' : '');
+          chip.innerHTML = `<span class="tag-editor-dot" style="background:${tag.color}"></span>${esc(tag.name)}`;
+          chip.addEventListener('mousedown', e => e.stopPropagation());
+          chip.addEventListener('click', e => {
+            e.stopPropagation();
+            if (!ann.tags) ann.tags = [];
+            if (annTagSet.has(tag.id)) {
+              ann.tags = ann.tags.filter(id => id !== tag.id);
+            } else {
+              ann.tags.push(tag.id);
+            }
+            refreshList();
+            redraw();
+          });
+          editor.appendChild(chip);
+        }
+      }
+
+      const doneBtn = document.createElement('button');
+      doneBtn.className = 'tag-editor-done';
+      doneBtn.textContent = 'Done';
+      doneBtn.addEventListener('mousedown', e => e.stopPropagation());
+      doneBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        expandedAnnotationId = null;
+        refreshList();
+      });
+      editor.appendChild(doneBtn);
+      item.appendChild(editor);
+    }
+
     item.addEventListener('mousedown', e => {
-      if (!e.target.classList.contains('ann-name-input') &&
-          !e.target.classList.contains('ann-del-btn')) {
+      if (e.target.classList.contains('ann-del-btn')) return;
+      if (e.target.closest('.ann-tag-editor')) return;
+      if (e.target.closest('.tag-edit-btn')) return;
+      if (!e.target.classList.contains('ann-name-input')) {
         selectAnnotation(ann.id);
       }
+    });
+
+    item.querySelector('.tag-edit-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      expandedAnnotationId = expandedAnnotationId === ann.id ? null : ann.id;
+      refreshList();
     });
 
     const inp = item.querySelector('.ann-name-input');
@@ -562,8 +646,95 @@ function clearAnnotations() {
   if (!confirm(`Remove all ${annotations.length} annotation${annotations.length > 1 ? 's' : ''}?`)) return;
   annotations = [];
   selectedId  = null;
+  expandedAnnotationId = null;
   refreshList();
   redraw();
+}
+
+// ── Tags ───────────────────────────────────────────────────────────────────
+function refreshTagsList() {
+  tagsList.innerHTML = '';
+  for (const tag of tags) {
+    const item = document.createElement('div');
+    item.className = 'tag-item' + (activeTags.has(tag.id) ? ' active' : '');
+    item.dataset.id = tag.id;
+    item.innerHTML = `
+      <span class="tag-dot" style="background:${tag.color}"></span>
+      <span class="tag-name">${esc(tag.name)}</span>
+      <button class="tag-del-btn" title="Delete tag">×</button>
+    `;
+    item.addEventListener('click', e => {
+      if (e.target.classList.contains('tag-del-btn')) return;
+      const ids = tags.map(t => t.id);
+      if (e.shiftKey && tagAnchorId) {
+        // Range: select from anchor to here, replacing current selection
+        const a = ids.indexOf(tagAnchorId), b = ids.indexOf(tag.id);
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        activeTags = new Set(ids.slice(lo, hi + 1));
+        // anchor stays the same
+      } else if (e.metaKey || e.ctrlKey) {
+        // Toggle this tag, update anchor
+        if (activeTags.has(tag.id)) activeTags.delete(tag.id);
+        else activeTags.add(tag.id);
+        tagAnchorId = tag.id;
+      } else {
+        // Plain click: select only this tag
+        activeTags  = new Set([tag.id]);
+        tagAnchorId = tag.id;
+      }
+      refreshTagsList();
+    });
+    item.querySelector('.tag-del-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      deleteTag(tag.id);
+    });
+    tagsList.appendChild(item);
+  }
+}
+
+
+function deleteTag(id) {
+  tags = tags.filter(t => t.id !== id);
+  activeTags.delete(id);
+  if (tagAnchorId === id) tagAnchorId = null;
+  for (const ann of annotations) {
+    if (ann.tags) ann.tags = ann.tags.filter(tid => tid !== id);
+  }
+  refreshTagsList();
+  refreshList();
+}
+
+function startAddTag() {
+  if (tagsList.querySelector('.tag-new-input')) return; // already adding
+  const color   = TAG_COLORS[tags.length % TAG_COLORS.length];
+  const wrapper = document.createElement('div');
+  wrapper.className = 'tag-item';
+  wrapper.innerHTML = `<span class="tag-dot" style="background:${color}"></span>`;
+  const inp = document.createElement('input');
+  inp.type        = 'text';
+  inp.className   = 'tag-new-input';
+  inp.placeholder = 'Tag name…';
+  inp.spellcheck  = false;
+  wrapper.appendChild(inp);
+  tagsList.appendChild(wrapper);
+  inp.focus();
+
+  const confirm = () => {
+    const name = inp.value.trim();
+    wrapper.remove();
+    if (!name) return;
+    const newTag = { id: uid(), name, color };
+    tags.push(newTag);
+    activeTags  = new Set([newTag.id]);
+    tagAnchorId = newTag.id;
+    refreshTagsList();
+  };
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); confirm(); }
+    if (e.key === 'Escape') { wrapper.remove(); }
+    e.stopPropagation();
+  });
+  inp.addEventListener('blur', confirm);
 }
 
 // ── JSON export / import ───────────────────────────────────────────────────
@@ -573,10 +744,12 @@ function downloadJSON() {
       image:    imageFileName,
       exported: new Date().toISOString(),
     },
+    tags: tags.map(t => ({ name: t.name, color: t.color })),
     annotations: annotations.map(a => ({
       type:   a.type,
       name:   a.name,
       coords: a.coords,
+      tags:   (a.tags || []).map(id => tags.find(t => t.id === id)?.name).filter(Boolean),
     })),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -594,8 +767,15 @@ function importJSONFile(file) {
   reader.onload = e => {
     try {
       const data = JSON.parse(e.target.result);
+      // Restore tags
+      tags = (data.tags || []).map(t => ({ id: uid(), name: t.name, color: t.color || TAG_COLORS[0] }));
+      activeTags.clear();
+      // Restore annotations, mapping tag names back to new IDs
       const list = data.annotations || (Array.isArray(data) ? data : []);
-      annotations = list.map(a => ({ id: uid(), type: a.type, name: a.name, coords: a.coords }));
+      annotations = list.map(a => ({
+        id: uid(), type: a.type, name: a.name, coords: a.coords,
+        tags: (a.tags || []).map(name => tags.find(t => t.name === name)?.id).filter(Boolean),
+      }));
       // Sync name counters so new annotations don't collide
       const prefixMap = { point: 'point', line: 'line', rect: 'rect', rectangle: 'rect' };
       for (const a of annotations) {
@@ -605,6 +785,7 @@ function importJSONFile(file) {
           if (key) counters[key] = Math.max(counters[key] || 0, parseInt(m[2], 10));
         }
       }
+      refreshTagsList();
       refreshList();
       redraw();
     } catch (err) {
@@ -678,4 +859,5 @@ function toggleTheme(light) {
 
 // ── Init ───────────────────────────────────────────────────────────────────
 setMode('select');
+refreshTagsList();
 refreshList();

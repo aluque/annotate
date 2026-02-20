@@ -179,6 +179,7 @@ body {
 .ann-item {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   padding: 5px 7px;
   border-radius: 6px;
   cursor: pointer;
@@ -238,6 +239,196 @@ body {
 }
 .ann-item:hover .ann-del-btn { opacity: 1; }
 .ann-del-btn:hover { color: var(--red); background: var(--bg3); }
+
+/* Tag edit button on annotation rows */
+.tag-edit-btn {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s, background 0.1s;
+  padding: 0;
+}
+.ann-item:hover .tag-edit-btn { opacity: 1; }
+.tag-edit-btn:hover { color: var(--accent-light); background: var(--bg3); }
+.tag-edit-btn.active { opacity: 1; color: var(--accent-light); }
+
+/* Expanded tag editor */
+.ann-tag-editor {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 0 2px 23px;
+}
+.tag-editor-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 5px;
+  border-radius: 12px;
+  border: 1.5px solid var(--border);
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  background: var(--bg2);
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+  user-select: none;
+}
+.tag-editor-chip:hover { background: var(--bg3); color: var(--text); }
+.tag-editor-chip.has-tag {
+  color: var(--text);
+  background: var(--bg3);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.tag-editor-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tag-editor-done {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  margin-left: 2px;
+}
+.tag-editor-done:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ── Tags panel ────────────────────────────────────────────────── */
+#tags-panel {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  max-height: 190px;
+  min-height: 38px;
+}
+
+#tags-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 5px;
+}
+#tags-list::-webkit-scrollbar { width: 4px; }
+#tags-list::-webkit-scrollbar-track { background: transparent; }
+#tags-list::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 2px; }
+
+.tag-item {
+  display: flex;
+  align-items: center;
+  padding: 4px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+  gap: 7px;
+  margin-bottom: 1px;
+  border: 1px solid transparent;
+  transition: background 0.1s;
+  user-select: none;
+}
+.tag-item:hover { background: var(--bg2); }
+.tag-item.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.tag-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid rgba(0,0,0,0.2);
+}
+.tag-item.active .tag-dot { box-shadow: 0 0 0 2px var(--bg1), 0 0 0 3.5px rgba(255,255,255,0.25); }
+
+.tag-name {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-add-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+}
+.tag-add-btn:hover { background: var(--bg3); color: var(--text); }
+
+.tag-del-btn {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.1s;
+  padding: 0;
+}
+.tag-item:hover .tag-del-btn { opacity: 1; }
+.tag-del-btn:hover { color: var(--red); background: var(--bg3); }
+
+.tag-new-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 12.5px;
+  color: var(--text);
+  font-family: inherit;
+  min-width: 0;
+}
+
+/* Tag dots inside annotation list rows */
+.ann-tag-dots {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.ann-tag-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
 
 /* ── Zoom viewer ───────────────────────────────────────────────── */
 #zoom-panel {
