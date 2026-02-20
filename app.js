@@ -24,6 +24,7 @@ let rectP1   = null;
 let dragging = false;
 
 let mouseCanvas = null;         // {x,y} in canvas coords, or null
+let shiftHeld   = false;
 
 // Panning state
 let isPanning = false;
@@ -73,6 +74,12 @@ function esc(s) {
 // Coordinate helpers
 function c2i(cx, cy) { return { x: cx / scale, y: cy / scale }; }
 function i2c(ix, iy) { return { x: ix * scale, y: iy * scale }; }
+
+// Constrain p2 to be axis-aligned with p1 (horizontal or vertical)
+function constrainAxis(p1, p2) {
+  const dx = Math.abs(p2.x - p1.x), dy = Math.abs(p2.y - p1.y);
+  return dx >= dy ? { x: p2.x, y: p1.y } : { x: p1.x, y: p2.y };
+}
 
 function getCanvasPos(e) {
   const r = mainCanvas.getBoundingClientRect();
@@ -249,8 +256,9 @@ mainCanvas.addEventListener('mousedown', e => {
       lineP1 = ip;
       redraw();
     } else {
+      const ip2 = e.shiftKey ? constrainAxis(lineP1, ip) : ip;
       addAnnotation({ id: uid(), type: 'line', name: nextName('line'),
-        coords: [[lineP1.x, lineP1.y], [ip.x, ip.y]] });
+        coords: [[lineP1.x, lineP1.y], [ip2.x, ip2.y]] });
       lineP1 = null;
     }
     return;
@@ -273,6 +281,7 @@ mainCanvas.addEventListener('mousemove', e => {
 
   const cp = getCanvasPos(e);
   mouseCanvas = cp;
+  shiftHeld   = e.shiftKey;
 
   if (sourceImage) {
     const ip = c2i(cp.x, cp.y);
@@ -359,14 +368,15 @@ function redraw() {
   const mp = mouseCanvas;
 
   if (mode === 'line' && lineP1 && mp) {
-    const p1 = i2c(lineP1.x, lineP1.y);
+    const p1  = i2c(lineP1.x, lineP1.y);
+    const end = shiftHeld ? constrainAxis(p1, mp) : mp;
     mainCtx.save();
     mainCtx.setLineDash([5, 4]);
     mainCtx.strokeStyle = C_PREVIEW;
     mainCtx.lineWidth = 1.5;
     mainCtx.beginPath();
     mainCtx.moveTo(p1.x, p1.y);
-    mainCtx.lineTo(mp.x, mp.y);
+    mainCtx.lineTo(end.x, end.y);
     mainCtx.stroke();
     mainCtx.setLineDash([]);
     paintDot(mainCtx, p1.x, p1.y, C_PREVIEW, 5);
@@ -821,6 +831,14 @@ canvasArea.addEventListener('drop', e => {
     if (file.type.startsWith('image/')) openImage(file);
     else if (file.name.endsWith('.json')) importJSONFile(file);
   }
+});
+
+// ── Shift key tracking (for axis-constrained drawing) ──────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'Shift' && lineP1) { shiftHeld = true; redraw(); }
+});
+document.addEventListener('keyup', e => {
+  if (e.key === 'Shift' && lineP1) { shiftHeld = false; redraw(); }
 });
 
 // ── Keyboard shortcuts ─────────────────────────────────────────────────────
