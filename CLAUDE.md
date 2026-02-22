@@ -8,7 +8,7 @@ A browser-based image annotation tool. Users open an image, place geometric anno
 
 ```
 index.html   – DOM layout (toolbar, sidebar, canvas area, status bar)
-app.js       – All application logic (~1100 lines, single file)
+app.js       – All application logic (~1380 lines, single file)
 style.css    – Styling; dark theme by default, light theme via body.light
 launch.sh    – macOS helper that opens the app in a browser (tries Safari → Chrome → Chromium → Firefox)
 scripts/     – Standalone Python CLI tools (extract.py, measure.py); superseded in-browser by the Tools menu
@@ -142,7 +142,7 @@ Dark is default (`:root` variables). Light theme adds `body.light` and overrides
 
 ## Tools menu (top-right toolbar)
 
-A wrench "Tools" button opens a dropdown with two data-analysis tools that operate on the **current in-memory annotations** (no export/import needed). Each opens a dialog where the user picks an optional tag filter, then clicks "Download CSV".
+A wrench "Tools" button opens a dropdown with six data-analysis tools that operate on the **current in-memory annotations** (no export/import needed). Each opens a dialog where the user picks an optional tag filter, then clicks "Download CSV".
 
 ### Extract
 Ports `scripts/extract.py`. Projects **point** annotations onto axes defined by **line** annotations.
@@ -161,6 +161,41 @@ Ports `scripts/measure.py`. Measures the pixel length of **line** annotations us
 - All lines passing the tag filter are measured against every scale (including scale lines themselves if unfiltered — faithful to the Python original)
 - CSV columns: `name` + one per scale name (sorted), one row per measured line
 - Output filename: `<imageBaseName>_measure.csv`
+
+### Profile
+Samples pixel intensity along **line** annotations at natural image resolution.
+
+- Any line annotation qualifies (no special naming required)
+- Renders `sourceImage` to an offscreen canvas, calls `getImageData` once per tool invocation
+- Samples nearest-neighbour at N+1 evenly-spaced points where N = `ceil(pixel length)`, capped at 10 000
+- Luminance: `0.2126r + 0.7152g + 0.0722b`
+- CSV columns: `name, position_px, x_px, y_px, r, g, b, luminance`
+- Output filename: `<imageBaseName>_profile.csv`
+
+### Angle
+Measures the orientation of **line** annotations.
+
+- Any line annotation qualifies (no special naming required)
+- Algorithm: `atan2(-dy, dx)` in degrees, normalised to `[0, 180)` (y negated to flip image→math coords; undirected)
+- 0° = horizontal, 90° = vertical; subtract two values to get the inter-line angle
+- CSV columns: `name, angle_deg`
+- Output filename: `<imageBaseName>_angle.csv`
+
+### Distances
+Measures pairwise pixel distances between all **point** annotations, with optional unit conversion.
+
+- **Scale line naming**: `NAME: length` — same convention as Measure
+- All pairs (i < j) of filtered points are measured; pixel distance × unitperpx per scale
+- CSV columns: `from, to, dist_<scale1>, dist_<scale2>, …`
+- Output filename: `<imageBaseName>_distances.csv`
+
+### Area
+Measures dimensions, aspect ratio, and area of **rectangle** annotations, with optional unit conversion.
+
+- **Scale line naming**: `NAME: length` — same convention as Measure
+- Per rectangle: `width_px`, `height_px`, `aspect_ratio` (w/h), then per scale: `width_K`, `height_K`, `area_K`
+- CSV columns: `name, width_px, height_px, aspect_ratio, width_<K>, height_<K>, area_<K>, …`
+- Output filename: `<imageBaseName>_area.csv`
 
 ### Tag filtering in tools
 Tags are stored in-memory by UUID (`ann.tags` = array of tag IDs). The dialog populates a `<select>` with tag names mapped to their IDs. `tagId && !ann.tags.includes(tagId)` performs the filter — identical semantics to the Python `tag not in item["tags"]` check on exported tag names.
