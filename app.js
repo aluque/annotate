@@ -43,6 +43,10 @@ let activeTags         = new Set(); // IDs of tags applied to the next new annot
 let tagAnchorId        = null;     // anchor for shift-click range selection
 let expandedAnnotationId = null;   // annotation whose tag editor is open
 
+// Undo stack
+const undoStack = [];
+const UNDO_LIMIT = 50;
+
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const mainCanvas = document.getElementById('main-canvas');
 const mainCtx    = mainCanvas.getContext('2d');
@@ -86,6 +90,34 @@ function getCanvasPos(e) {
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
 
+// ── Undo ───────────────────────────────────────────────────────────────────
+function pushUndo() {
+  undoStack.push({
+    annotations: JSON.parse(JSON.stringify(annotations)),
+    tags:        JSON.parse(JSON.stringify(tags)),
+    counters:    { ...counters },
+  });
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+}
+
+function undo() {
+  if (undoStack.length === 0) return;
+  const state = undoStack.pop();
+  annotations          = state.annotations;
+  tags                 = state.tags;
+  counters.point       = state.counters.point;
+  counters.line        = state.counters.line;
+  counters.rect        = state.counters.rect;
+  selectedId           = null;
+  expandedAnnotationId = null;
+  // Drop any activeTags that no longer exist
+  const tagIds = new Set(tags.map(t => t.id));
+  for (const id of activeTags) if (!tagIds.has(id)) activeTags.delete(id);
+  refreshTagsList();
+  refreshList();
+  redraw();
+}
+
 // ── Mode ───────────────────────────────────────────────────────────────────
 function setMode(m) {
   mode     = m;
@@ -127,10 +159,9 @@ function openImage(file) {
     sourceImage = img;
     imgW = img.naturalWidth;
     imgH = img.naturalHeight;
-    fitCanvas();
     dropZone.style.display   = 'none';
     canvasWrap.style.display = 'block';
-    redraw();
+    fitToView();
     URL.revokeObjectURL(url);
   };
   img.src = url;
@@ -157,8 +188,29 @@ function updateCanvasPadding() {
   canvasWrap.style.margin = `${my}px ${mx}px`;
 }
 
+// Fit image to viewport and scroll to show it centred (F key).
+function fitToView() {
+  if (!sourceImage) return;
+  fitCanvas();
+  redraw();
+  canvasArea.scrollLeft = 0;
+  canvasArea.scrollTop  = 0;
+  updateCoordsHud(null, null);
+}
+
+// Update the coordinate / zoom HUD.  Call with (ix, iy) when the mouse is
+// over the canvas, or (null, null) to show only the zoom level.
+function updateCoordsHud(ix, iy) {
+  if (!sourceImage) { coordsHud.textContent = '—'; return; }
+  const z = `${Math.round(scale * 100)}%`;
+  coordsHud.textContent = ix != null
+    ? `x: ${ix.toFixed(2)}   y: ${iy.toFixed(2)}   ·   ${z}`
+    : z;
+}
+
 // ── Annotation CRUD ────────────────────────────────────────────────────────
 function addAnnotation(ann) {
+  pushUndo();
   ann.tags = [...activeTags];
   annotations.push(ann);
   selectedId = ann.id;
@@ -168,6 +220,7 @@ function addAnnotation(ann) {
 }
 
 function deleteAnnotation(id) {
+  pushUndo();
   annotations = annotations.filter(a => a.id !== id);
   if (selectedId === id) selectedId = null;
   if (expandedAnnotationId === id) expandedAnnotationId = null;
@@ -285,7 +338,7 @@ mainCanvas.addEventListener('mousemove', e => {
 
   if (sourceImage) {
     const ip = c2i(cp.x, cp.y);
-    coordsHud.textContent = `x: ${ip.x.toFixed(2)}   y: ${ip.y.toFixed(2)}`;
+    updateCoordsHud(ip.x, ip.y);
     updateZoom(cp.x, cp.y);
   }
 
@@ -317,7 +370,7 @@ mainCanvas.addEventListener('mouseup', e => {
 
 mainCanvas.addEventListener('mouseleave', () => {
   mouseCanvas = null;
-  coordsHud.textContent = '—';
+  updateCoordsHud(null, null);
   updateZoom(null, null);
   if (dragging || lineP1) redraw();
 });
@@ -351,6 +404,7 @@ mainCanvas.addEventListener('wheel', e => {
   const areaRect = canvasArea.getBoundingClientRect();
   canvasArea.scrollLeft = canvasWrap.offsetLeft + imgX * scale - (e.clientX - areaRect.left);
   canvasArea.scrollTop  = canvasWrap.offsetTop  + imgY * scale - (e.clientY - areaRect.top);
+  updateCoordsHud(imgX, imgY);
 }, { passive: false });
 
 // ── Main canvas render ─────────────────────────────────────────────────────
@@ -360,8 +414,7 @@ function redraw() {
   mainCtx.drawImage(sourceImage, 0, 0, mainCanvas.width, mainCanvas.height);
 
   for (const ann of annotations) {
-    const sel = ann.id === selectedId;
-    drawAnnotation(mainCtx, ann, sel ? C_SELECTED : C_NORMAL, true);
+    drawAnnotation(mainCtx, ann, annotationColor(ann), true);
   }
 
   // In-progress previews
@@ -398,6 +451,16 @@ function redraw() {
 }
 
 // ── Drawing helpers ────────────────────────────────────────────────────────
+// Returns the display color for an annotation: selected red, first-tag color, or default yellow.
+function annotationColor(ann) {
+  if (ann.id === selectedId) return C_SELECTED;
+  if (ann.tags && ann.tags.length > 0) {
+    const tag = tags.find(t => t.id === ann.tags[0]);
+    if (tag) return tag.color;
+  }
+  return C_NORMAL;
+}
+
 function drawAnnotation(ctx, ann, color, showLabel) {
   ctx.save();
   if (ann.type === 'point') {
@@ -479,7 +542,7 @@ function updateZoom(cx, cy) {
   });
 
   for (const ann of annotations) {
-    const color = ann.id === selectedId ? C_SELECTED : C_NORMAL;
+    const color = annotationColor(ann);
     zoomCtx.save();
 
     if (ann.type === 'point') {
@@ -586,6 +649,7 @@ function refreshList() {
           chip.addEventListener('mousedown', e => e.stopPropagation());
           chip.addEventListener('click', e => {
             e.stopPropagation();
+            pushUndo();
             if (!ann.tags) ann.tags = [];
             if (annTagSet.has(tag.id)) {
               ann.tags = ann.tags.filter(id => id !== tag.id);
@@ -634,7 +698,7 @@ function refreshList() {
     });
     inp.addEventListener('change', e => {
       const a = annotations.find(x => x.id === e.target.dataset.id);
-      if (a) { a.name = e.target.value || a.name; redraw(); }
+      if (a) { pushUndo(); a.name = e.target.value || a.name; redraw(); }
     });
     inp.addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.target.blur(); }
@@ -654,6 +718,7 @@ function refreshList() {
 function clearAnnotations() {
   if (annotations.length === 0) return;
   if (!confirm(`Remove all ${annotations.length} annotation${annotations.length > 1 ? 's' : ''}?`)) return;
+  pushUndo();
   annotations = [];
   selectedId  = null;
   expandedAnnotationId = null;
@@ -704,6 +769,7 @@ function refreshTagsList() {
 
 
 function deleteTag(id) {
+  pushUndo();
   tags = tags.filter(t => t.id !== id);
   activeTags.delete(id);
   if (tagAnchorId === id) tagAnchorId = null;
@@ -733,6 +799,7 @@ function startAddTag() {
     const name = inp.value.trim();
     wrapper.remove();
     if (!name) return;
+    pushUndo();
     const newTag = { id: uid(), name, color };
     tags.push(newTag);
     activeTags  = new Set([newTag.id]);
@@ -777,6 +844,7 @@ function importJSONFile(file) {
   reader.onload = e => {
     try {
       const data = JSON.parse(e.target.result);
+      pushUndo();
       // Restore tags
       tags = (data.tags || []).map(t => ({ id: uid(), name: t.name, color: t.color || TAG_COLORS[0] }));
       activeTags.clear();
@@ -849,6 +917,18 @@ document.addEventListener('keydown', e => {
   if (k === 'p') { setMode('point');  return; }
   if (k === 'l') { setMode('line');   return; }
   if (k === 'r') { setMode('rect');   return; }
+  if (k === 'f') { fitToView(); return; }
+  if ((e.metaKey || e.ctrlKey) && k === 'z') { e.preventDefault(); undo(); return; }
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    if (annotations.length === 0) return;
+    const idx  = annotations.findIndex(a => a.id === selectedId);
+    const next = e.shiftKey
+      ? (idx <= 0 ? annotations.length - 1 : idx - 1)
+      : (idx >= annotations.length - 1 ? 0 : idx + 1);
+    selectAnnotation(annotations[next].id);
+    return;
+  }
   if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
     deleteAnnotation(selectedId);
     return;
@@ -867,7 +947,7 @@ document.addEventListener('keydown', e => {
 
 // ── Window resize ──────────────────────────────────────────────────────────
 window.addEventListener('resize', () => {
-  if (sourceImage) fitCanvas(), redraw();
+  if (sourceImage) { fitCanvas(); redraw(); updateCoordsHud(null, null); }
 });
 
 // ── Theme ──────────────────────────────────────────────────────────────────
