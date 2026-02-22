@@ -978,7 +978,10 @@ function downloadCSV(content, filename) {
 }
 
 function csvSanitize(s) {
-  return s.includes(',') ? `"${s}"` : s;
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
 }
 
 // ── Extract (plot digitizer) ────────────────────────────────────────────────
