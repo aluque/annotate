@@ -875,6 +875,227 @@ function toggleTheme(light) {
   document.body.classList.toggle('light', light);
 }
 
+// ── Tools ──────────────────────────────────────────────────────────────────
+const TOOL_CONFIGS = {
+  extract: {
+    title: 'Extract',
+    desc:  'Projects point annotations onto axes defined by line annotations. ' +
+           'Name axis lines as "X: 0 100" (start value, end value) or "Y: 1e-3 1 L" (log scale). ' +
+           'Points are projected onto every axis; tag filter limits which points are included.',
+    run:   runExtract,
+  },
+  measure: {
+    title: 'Measure',
+    desc:  'Measures line lengths using a pixel scale. Name one line annotation as ' +
+           '"scale: 100" to indicate it spans 100 units. ' +
+           'Tag filter limits which other lines are measured (scale lines are always used as reference).',
+    run:   runMeasure,
+  },
+};
+
+let currentTool = null;
+
+function toggleToolsMenu(e) {
+  e.stopPropagation();
+  const btn      = document.getElementById('btn-tools');
+  const dropdown = document.getElementById('tools-dropdown');
+  const isOpen   = dropdown.classList.contains('open');
+  closeToolsMenu();
+  if (!isOpen) {
+    btn.classList.add('open');
+    dropdown.classList.add('open');
+  }
+}
+
+function closeToolsMenu() {
+  document.getElementById('btn-tools').classList.remove('open');
+  document.getElementById('tools-dropdown').classList.remove('open');
+}
+
+document.addEventListener('click', () => closeToolsMenu());
+
+function openToolDialog(toolName) {
+  closeToolsMenu();
+  currentTool = toolName;
+  const cfg = TOOL_CONFIGS[toolName];
+  document.getElementById('modal-title').textContent = cfg.title;
+  document.getElementById('modal-desc').textContent  = cfg.desc;
+
+  // Populate tag selector with current tags
+  const sel = document.getElementById('modal-tag-select');
+  sel.innerHTML = '<option value="">All tags</option>';
+  for (const tag of tags) {
+    const opt       = document.createElement('option');
+    opt.value       = tag.id;
+    opt.textContent = tag.name;
+    sel.appendChild(opt);
+  }
+
+  document.getElementById('tool-modal').classList.add('open');
+}
+
+function closeToolDialog() {
+  document.getElementById('tool-modal').classList.remove('open');
+  currentTool = null;
+}
+
+// Close modal on overlay click
+document.getElementById('tool-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('tool-modal')) closeToolDialog();
+});
+
+// Escape closes modal/dropdown before the global shortcut handler sees it
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (document.getElementById('tool-modal').classList.contains('open')) {
+    e.stopImmediatePropagation();
+    closeToolDialog();
+    return;
+  }
+  if (document.getElementById('tools-dropdown').classList.contains('open')) {
+    e.stopImmediatePropagation();
+    closeToolsMenu();
+  }
+}, true); // capture phase – fires before other keydown listeners
+
+function runCurrentTool() {
+  if (!currentTool) return;
+  const tagId  = document.getElementById('modal-tag-select').value;
+  const result = TOOL_CONFIGS[currentTool].run(tagId);
+  if (result.error) { alert(result.error); return; }
+  downloadCSV(result.csv, result.filename);
+  closeToolDialog();
+}
+
+function downloadCSV(content, filename) {
+  const blob = new Blob([content], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvSanitize(s) {
+  return s.includes(',') ? `"${s}"` : s;
+}
+
+// ── Extract (plot digitizer) ────────────────────────────────────────────────
+// Replicates extract.py logic in-browser.
+// Axis lines: named "NAME: val1 val2 [L]"  (L = log scale)
+// Point annotations are projected onto every axis via dot-product.
+function runExtract(tagId) {
+  const axisRe = /^(\w+):\s*([\d.efg+\-]+)\s+([\d.efg+\-]+)\s*(L?)\s*/i;
+  const axes   = [];
+
+  for (const ann of annotations) {
+    if (ann.type !== 'line') continue;
+    const m = ann.name.match(axisRe);
+    if (!m) continue;
+    const rawA  = parseFloat(m[2]);
+    const rawB  = parseFloat(m[3]);
+    const islog = m[4].toUpperCase() === 'L';
+    const r0    = ann.coords[0];
+    const r1    = ann.coords[1];
+    const dx    = r1[0] - r0[0], dy = r1[1] - r0[1];
+    const l2    = dx * dx + dy * dy;
+    if (l2 === 0) continue;
+    axes.push({
+      name:  m[1],
+      r0,
+      delta: [dx, dy],
+      l2,
+      a:     islog ? Math.log(rawA) : rawA,
+      b:     islog ? Math.log(rawB) : rawB,
+      islog,
+    });
+  }
+
+  if (axes.length === 0) {
+    return { error: 'No axes found.\nName line annotations as "X: 0 100" or "Y: 1e-3 1e3 L" to define axes.' };
+  }
+
+  const col = {};
+  for (const ax of axes) col[ax.name] = [];
+  let count = 0;
+
+  for (const ann of annotations) {
+    if (ann.type !== 'point') continue;
+    if (tagId && !ann.tags.includes(tagId)) continue;
+    const c = ann.coords;
+    for (const ax of axes) {
+      let v = ax.a + (ax.b - ax.a) *
+        ((c[0] - ax.r0[0]) * ax.delta[0] + (c[1] - ax.r0[1]) * ax.delta[1]) / ax.l2;
+      if (ax.islog) v = Math.exp(v);
+      col[ax.name].push(v);
+    }
+    count++;
+  }
+
+  if (count === 0) {
+    return { error: 'No points found' + (tagId ? ' with the selected tag.' : '.') };
+  }
+
+  const keys = Object.keys(col).sort();
+  let csv = keys.map(csvSanitize).join(',') + '\n';
+  const n = col[keys[0]].length;
+  for (let i = 0; i < n; i++) {
+    csv += keys.map(k => col[k][i]).join(',') + '\n';
+  }
+  return { csv, filename: `${imageBaseName}_extract.csv` };
+}
+
+// ── Measure (length measurement) ───────────────────────────────────────────
+// Replicates measure.py logic in-browser.
+// Scale lines: named "NAME: length"
+// All line annotations (filtered by tag) are measured against every scale.
+function runMeasure(tagId) {
+  const scaleRe = /^(\w+):\s*([\d.efg+\-]+)\s*$/i;
+  const scales  = [];
+
+  for (const ann of annotations) {
+    if (ann.type !== 'line') continue;
+    const m = ann.name.match(scaleRe);
+    if (!m) continue;
+    const r0    = ann.coords[0];
+    const r1    = ann.coords[1];
+    const dx    = r1[0] - r0[0], dy = r1[1] - r0[1];
+    const pxlen = Math.sqrt(dx * dx + dy * dy);
+    if (pxlen === 0) continue;
+    scales.push({ name: m[1], unitperpx: parseFloat(m[2]) / pxlen });
+  }
+
+  if (scales.length === 0) {
+    return { error: 'No scale found.\nName a line annotation as "scale: 100" to define a scale of 100 units.' };
+  }
+
+  const col   = {};
+  const names = [];
+  for (const sc of scales) col[sc.name] = [];
+
+  for (const ann of annotations) {
+    if (ann.type !== 'line') continue;
+    if (tagId && !ann.tags.includes(tagId)) continue;
+    const c   = ann.coords;
+    const dx  = c[1][0] - c[0][0], dy = c[1][1] - c[0][1];
+    const pxl = Math.sqrt(dx * dx + dy * dy);
+    names.push(ann.name);
+    for (const sc of scales) col[sc.name].push(pxl * sc.unitperpx);
+  }
+
+  if (names.length === 0) {
+    return { error: 'No lines found' + (tagId ? ' with the selected tag.' : '.') };
+  }
+
+  const keys = Object.keys(col).sort();
+  let csv = 'name,' + keys.map(csvSanitize).join(',') + '\n';
+  for (let i = 0; i < names.length; i++) {
+    csv += csvSanitize(names[i]) + ',' + keys.map(k => col[k][i]).join(',') + '\n';
+  }
+  return { csv, filename: `${imageBaseName}_measure.csv` };
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 setMode('select');
 refreshTagsList();

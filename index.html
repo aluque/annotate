@@ -97,6 +97,47 @@
     Light theme
   </label>
 
+  <div class="sep"></div>
+
+  <div class="tools-menu" id="tools-menu">
+    <button class="btn btn-tools" id="btn-tools" onclick="toggleToolsMenu(event)">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
+      </svg>
+      Tools
+      <svg class="tools-chevron" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    </button>
+    <div class="tools-dropdown" id="tools-dropdown">
+      <button class="tools-dropdown-item" onclick="openToolDialog('extract')">
+        <svg class="tools-item-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <polyline points="4 18 4 4 20 4"/>
+          <circle cx="9" cy="13" r="2" fill="currentColor" stroke="none"/>
+          <circle cx="13" cy="9" r="2" fill="currentColor" stroke="none"/>
+          <circle cx="17" cy="15" r="2" fill="currentColor" stroke="none"/>
+        </svg>
+        <span class="tools-item-text">
+          <span class="tools-item-name">Extract</span>
+          <span class="tools-item-desc">Project points onto plot axes</span>
+        </span>
+      </button>
+      <button class="tools-dropdown-item" onclick="openToolDialog('measure')">
+        <svg class="tools-item-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="8" width="20" height="8" rx="2"/>
+          <line x1="6" y1="12" x2="6" y2="16"/>
+          <line x1="10" y1="12" x2="10" y2="14"/>
+          <line x1="14" y1="12" x2="14" y2="14"/>
+          <line x1="18" y1="12" x2="18" y2="16"/>
+        </svg>
+        <span class="tools-item-text">
+          <span class="tools-item-name">Measure</span>
+          <span class="tools-item-desc">Measure line lengths via scale</span>
+        </span>
+      </button>
+    </div>
+  </div>
+
   <input type="file" id="file-input" accept="image/*">
   <input type="file" id="json-input" accept=".json">
 </div>
@@ -163,6 +204,39 @@
     <span class="sb-key">Esc</span> Cancel
   </span>
   <span id="status-hint"></span>
+</div>
+
+<div class="modal-overlay" id="tool-modal">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-title">Tool</h2>
+      <button class="modal-close" onclick="closeToolDialog()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-desc" id="modal-desc"></p>
+      <div class="modal-field">
+        <label class="modal-label" for="modal-tag-select">Tag filter</label>
+        <select class="modal-select" id="modal-tag-select">
+          <option value="">All tags</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-modal-cancel" onclick="closeToolDialog()">Cancel</button>
+      <button class="btn-modal-primary" onclick="runCurrentTool()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Download CSV
+      </button>
+    </div>
+  </div>
 </div>
 
 <script src="app.js"></script>
