@@ -963,8 +963,8 @@ window.addEventListener('resize', () => {
 });
 
 // ── Theme ──────────────────────────────────────────────────────────────────
-function toggleTheme(light) {
-  document.body.classList.toggle('light', light);
+function toggleTheme() {
+  document.body.classList.toggle('light');
 }
 
 // ── Tools ──────────────────────────────────────────────────────────────────
@@ -1004,7 +1004,24 @@ function closeToolsMenu() {
   document.getElementById('tools-dropdown').classList.remove('open');
 }
 
-document.addEventListener('click', () => closeToolsMenu());
+function toggleFileMenu(e) {
+  e.stopPropagation();
+  const btn      = document.getElementById('btn-file');
+  const dropdown = document.getElementById('file-dropdown');
+  const isOpen   = dropdown.classList.contains('open');
+  closeFileMenu();
+  if (!isOpen) {
+    btn.classList.add('open');
+    dropdown.classList.add('open');
+  }
+}
+
+function closeFileMenu() {
+  document.getElementById('btn-file').classList.remove('open');
+  document.getElementById('file-dropdown').classList.remove('open');
+}
+
+document.addEventListener('click', () => { closeToolsMenu(); closeFileMenu(); });
 
 function openToolDialog(toolName) {
   closeToolsMenu();
@@ -1047,6 +1064,11 @@ document.addEventListener('keydown', e => {
   if (document.getElementById('tools-dropdown').classList.contains('open')) {
     e.stopImmediatePropagation();
     closeToolsMenu();
+    return;
+  }
+  if (document.getElementById('file-dropdown').classList.contains('open')) {
+    e.stopImmediatePropagation();
+    closeFileMenu();
   }
 }, true); // capture phase – fires before other keydown listeners
 
