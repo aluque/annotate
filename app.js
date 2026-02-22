@@ -1280,7 +1280,27 @@ function runProfile(tagId) {
     return { r: data[idx], g: data[idx + 1], b: data[idx + 2] };
   }
 
-  let csv = 'name,position_px,x_px,y_px,r,g,b,luminance\n';
+  // Collect any defined scales (optional — pixel columns are always output)
+  const scaleRe = /^(\w+):\s*([\d.efg+\-]+)\s*$/i;
+  const scales  = [];
+  for (const ann of annotations) {
+    if (ann.type !== 'line') continue;
+    const m = ann.name.match(scaleRe);
+    if (!m) continue;
+    const dx    = ann.coords[1][0] - ann.coords[0][0];
+    const dy    = ann.coords[1][1] - ann.coords[0][1];
+    const pxlen = Math.sqrt(dx * dx + dy * dy);
+    if (pxlen === 0) continue;
+    scales.push({ name: m[1], unitperpx: parseFloat(m[2]) / pxlen });
+  }
+  const scaleKeys  = scales.map(sc => sc.name).sort();
+  const scaleMap   = Object.fromEntries(scales.map(sc => [sc.name, sc.unitperpx]));
+  const scaleCols  = scaleKeys.flatMap(k => [`position_${k}`, `x_${k}`, `y_${k}`]);
+
+  let csv = 'name,position_px,x_px,y_px' +
+    (scaleCols.length ? ',' + scaleCols.map(csvSanitize).join(',') : '') +
+    ',r,g,b,luminance\n';
+
   for (const ann of lines) {
     const [x1, y1] = ann.coords[0];
     const [x2, y2] = ann.coords[1];
@@ -1294,7 +1314,13 @@ function runProfile(tagId) {
       const pos = t * len;
       const { r, g, b } = sampleAt(x, y);
       const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      csv += `${csvSanitize(ann.name)},${pos.toFixed(3)},${x.toFixed(3)},${y.toFixed(3)},${r},${g},${b},${lum.toFixed(3)}\n`;
+      const scalePart = scaleKeys.length
+        ? ',' + scaleKeys.flatMap(k => {
+            const u = scaleMap[k];
+            return [(pos * u).toFixed(6), (x * u).toFixed(6), (y * u).toFixed(6)];
+          }).join(',')
+        : '';
+      csv += `${csvSanitize(ann.name)},${pos.toFixed(3)},${x.toFixed(3)},${y.toFixed(3)}${scalePart},${r},${g},${b},${lum.toFixed(3)}\n`;
     }
   }
   return { csv, filename: `${imageBaseName}_profile.csv` };
