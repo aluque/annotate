@@ -983,6 +983,36 @@ const TOOL_CONFIGS = {
            'Tag filter limits which other lines are measured (scale lines are always used as reference).',
     run:   runMeasure,
   },
+  profile: {
+    title: 'Profile',
+    desc:  'Samples pixel intensity along each line annotation. ' +
+           'Outputs position, coordinates, R/G/B, and luminance for each sample point. ' +
+           'Tag filter limits which lines are profiled.',
+    run:   runProfile,
+  },
+  angle: {
+    title: 'Angle',
+    desc:  'Measures orientation of line annotations in degrees (0–180°, where 0° is horizontal). ' +
+           'Subtract two values to get the inter-line angle. ' +
+           'Tag filter limits which lines are included.',
+    run:   runAngle,
+  },
+  distances: {
+    title: 'Distances',
+    desc:  'Measures pairwise pixel distances between all point annotations, ' +
+           'with optional conversion to physical units. ' +
+           'Name a line as "scale: 100" to define a scale. ' +
+           'Tag filter limits which points are measured.',
+    run:   runDistances,
+  },
+  area: {
+    title: 'Area',
+    desc:  'Measures width, height, aspect ratio, and area of rectangle annotations, ' +
+           'with optional conversion to physical units. ' +
+           'Name a line as "scale: 100" to define a scale. ' +
+           'Tag filter limits which rectangles are measured.',
+    run:   runArea,
+  },
 };
 
 let currentTool = null;
@@ -1211,6 +1241,189 @@ function runMeasure(tagId) {
     csv += csvSanitize(names[i]) + ',' + keys.map(k => col[k][i]).join(',') + '\n';
   }
   return { csv, filename: `${imageBaseName}_measure.csv` };
+}
+
+// ── Profile (intensity along a line) ───────────────────────────────────────
+// Samples pixel RGB/luminance at evenly-spaced points along each line annotation.
+function runProfile(tagId) {
+  if (!sourceImage) return { error: 'No image loaded.' };
+
+  const lines = annotations.filter(ann => {
+    if (ann.type !== 'line') return false;
+    if (tagId && !ann.tags.includes(tagId)) return false;
+    return true;
+  });
+
+  if (lines.length === 0) {
+    return { error: 'No lines found' + (tagId ? ' with the selected tag.' : '.') };
+  }
+
+  // Render source image at natural resolution into an offscreen canvas
+  const offscreen = document.createElement('canvas');
+  offscreen.width  = imgW;
+  offscreen.height = imgH;
+  const offCtx = offscreen.getContext('2d');
+  offCtx.drawImage(sourceImage, 0, 0, imgW, imgH);
+
+  let imageData;
+  try {
+    imageData = offCtx.getImageData(0, 0, imgW, imgH);
+  } catch (err) {
+    return { error: 'Cannot read pixel data: image may be cross-origin tainted.\n' + err.message };
+  }
+
+  const data = imageData.data;
+  function sampleAt(x, y) {
+    const xi  = Math.round(Math.max(0, Math.min(imgW - 1, x)));
+    const yi  = Math.round(Math.max(0, Math.min(imgH - 1, y)));
+    const idx = (yi * imgW + xi) * 4;
+    return { r: data[idx], g: data[idx + 1], b: data[idx + 2] };
+  }
+
+  let csv = 'name,position_px,x_px,y_px,r,g,b,luminance\n';
+  for (const ann of lines) {
+    const [x1, y1] = ann.coords[0];
+    const [x2, y2] = ann.coords[1];
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const nSamples = Math.max(1, Math.min(10000, Math.ceil(len)));
+    for (let i = 0; i <= nSamples; i++) {
+      const t   = i / nSamples;
+      const x   = x1 + t * dx;
+      const y   = y1 + t * dy;
+      const pos = t * len;
+      const { r, g, b } = sampleAt(x, y);
+      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      csv += `${csvSanitize(ann.name)},${pos.toFixed(3)},${x.toFixed(3)},${y.toFixed(3)},${r},${g},${b},${lum.toFixed(3)}\n`;
+    }
+  }
+  return { csv, filename: `${imageBaseName}_profile.csv` };
+}
+
+// ── Angle (line orientation) ────────────────────────────────────────────────
+// Reports orientation in [0, 180) degrees (y-axis flipped to match standard math).
+// Subtract two values to get the inter-line angle.
+function runAngle(tagId) {
+  const lines = annotations.filter(ann => {
+    if (ann.type !== 'line') return false;
+    if (tagId && !ann.tags.includes(tagId)) return false;
+    return true;
+  });
+
+  if (lines.length === 0) {
+    return { error: 'No lines found' + (tagId ? ' with the selected tag.' : '.') };
+  }
+
+  let csv = 'name,angle_deg\n';
+  for (const ann of lines) {
+    const dx = ann.coords[1][0] - ann.coords[0][0];
+    const dy = ann.coords[1][1] - ann.coords[0][1];
+    // Negate dy: image y increases downward, math y increases upward
+    let angle = Math.atan2(-dy, dx) * 180 / Math.PI;
+    // Normalise to [0, 180) — lines are undirected
+    if (angle < 0)    angle += 180;
+    if (angle >= 180) angle -= 180;
+    csv += `${csvSanitize(ann.name)},${angle.toFixed(4)}\n`;
+  }
+  return { csv, filename: `${imageBaseName}_angle.csv` };
+}
+
+// ── Distances (pairwise point distances) ────────────────────────────────────
+// Scale lines: named "NAME: length" — same convention as Measure.
+function runDistances(tagId) {
+  const scaleRe = /^(\w+):\s*([\d.efg+\-]+)\s*$/i;
+  const scales  = [];
+
+  for (const ann of annotations) {
+    if (ann.type !== 'line') continue;
+    const m = ann.name.match(scaleRe);
+    if (!m) continue;
+    const dx    = ann.coords[1][0] - ann.coords[0][0];
+    const dy    = ann.coords[1][1] - ann.coords[0][1];
+    const pxlen = Math.sqrt(dx * dx + dy * dy);
+    if (pxlen === 0) continue;
+    scales.push({ name: m[1], unitperpx: parseFloat(m[2]) / pxlen });
+  }
+
+  if (scales.length === 0) {
+    return { error: 'No scale found.\nName a line annotation as "scale: 100" to define a scale of 100 units.' };
+  }
+
+  const points = annotations.filter(ann => {
+    if (ann.type !== 'point') return false;
+    if (tagId && !ann.tags.includes(tagId)) return false;
+    return true;
+  });
+
+  if (points.length < 2) {
+    return { error: 'Need at least 2 points' + (tagId ? ' with the selected tag.' : '.') };
+  }
+
+  const keys     = scales.map(sc => sc.name).sort();
+  const scaleMap = Object.fromEntries(scales.map(sc => [sc.name, sc.unitperpx]));
+
+  let csv = 'from,to,' + keys.map(k => csvSanitize(`dist_${k}`)).join(',') + '\n';
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const pi = points[i], pj = points[j];
+      const dx = pj.coords[0] - pi.coords[0];
+      const dy = pj.coords[1] - pi.coords[1];
+      const pxDist = Math.sqrt(dx * dx + dy * dy);
+      const row = keys.map(k => (pxDist * scaleMap[k]).toFixed(6)).join(',');
+      csv += `${csvSanitize(pi.name)},${csvSanitize(pj.name)},${row}\n`;
+    }
+  }
+  return { csv, filename: `${imageBaseName}_distances.csv` };
+}
+
+// ── Area (rectangle dimensions) ─────────────────────────────────────────────
+// Scale lines: named "NAME: length" — same convention as Measure.
+function runArea(tagId) {
+  const scaleRe = /^(\w+):\s*([\d.efg+\-]+)\s*$/i;
+  const scales  = [];
+
+  for (const ann of annotations) {
+    if (ann.type !== 'line') continue;
+    const m = ann.name.match(scaleRe);
+    if (!m) continue;
+    const dx    = ann.coords[1][0] - ann.coords[0][0];
+    const dy    = ann.coords[1][1] - ann.coords[0][1];
+    const pxlen = Math.sqrt(dx * dx + dy * dy);
+    if (pxlen === 0) continue;
+    scales.push({ name: m[1], unitperpx: parseFloat(m[2]) / pxlen });
+  }
+
+  if (scales.length === 0) {
+    return { error: 'No scale found.\nName a line annotation as "scale: 100" to define a scale of 100 units.' };
+  }
+
+  const rects = annotations.filter(ann => {
+    if (ann.type !== 'rect') return false;
+    if (tagId && !ann.tags.includes(tagId)) return false;
+    return true;
+  });
+
+  if (rects.length === 0) {
+    return { error: 'No rectangles found' + (tagId ? ' with the selected tag.' : '.') };
+  }
+
+  const keys     = scales.map(sc => sc.name).sort();
+  const scaleMap = Object.fromEntries(scales.map(sc => [sc.name, sc.unitperpx]));
+
+  const scaleCols = keys.flatMap(k => [`width_${k}`, `height_${k}`, `area_${k}`]);
+  let csv = 'name,width_px,height_px,aspect_ratio,' + scaleCols.map(csvSanitize).join(',') + '\n';
+
+  for (const ann of rects) {
+    const wPx   = Math.abs(ann.coords[1][0] - ann.coords[0][0]);
+    const hPx   = Math.abs(ann.coords[1][1] - ann.coords[0][1]);
+    const aspect = hPx === 0 ? 0 : wPx / hPx;
+    const scalePart = keys.flatMap(k => {
+      const u = scaleMap[k];
+      return [(wPx * u).toFixed(6), (hPx * u).toFixed(6), (wPx * hPx * u * u).toFixed(6)];
+    }).join(',');
+    csv += `${csvSanitize(ann.name)},${wPx.toFixed(3)},${hPx.toFixed(3)},${aspect.toFixed(6)},${scalePart}\n`;
+  }
+  return { csv, filename: `${imageBaseName}_area.csv` };
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────

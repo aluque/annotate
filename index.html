@@ -130,6 +130,54 @@
           <span class="tools-item-desc">Measure line lengths via scale</span>
         </span>
       </button>
+      <div class="file-dropdown-divider"></div>
+      <button class="tools-dropdown-item" onclick="openToolDialog('profile')">
+        <svg class="tools-item-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="4 20 4 4 20 4"/>
+          <polyline points="4 16 7 10 10 14 13 8 17 12 20 9"/>
+        </svg>
+        <span class="tools-item-text">
+          <span class="tools-item-name">Profile</span>
+          <span class="tools-item-desc">Sample intensity along lines</span>
+        </span>
+      </button>
+      <button class="tools-dropdown-item" onclick="openToolDialog('angle')">
+        <svg class="tools-item-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="20" x2="21" y2="20"/>
+          <line x1="3" y1="20" x2="14" y2="5"/>
+          <path d="M10 20 A8 8 0 0 1 8.7 14.7"/>
+        </svg>
+        <span class="tools-item-text">
+          <span class="tools-item-name">Angle</span>
+          <span class="tools-item-desc">Measure line orientations</span>
+        </span>
+      </button>
+      <button class="tools-dropdown-item" onclick="openToolDialog('distances')">
+        <svg class="tools-item-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="5" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+          <circle cx="19" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+          <line x1="7.5" y1="12" x2="16.5" y2="12"/>
+          <line x1="7.5" y1="9" x2="7.5" y2="15"/>
+          <line x1="16.5" y1="9" x2="16.5" y2="15"/>
+        </svg>
+        <span class="tools-item-text">
+          <span class="tools-item-name">Distances</span>
+          <span class="tools-item-desc">Pairwise point distances</span>
+        </span>
+      </button>
+      <button class="tools-dropdown-item" onclick="openToolDialog('area')">
+        <svg class="tools-item-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="5" width="14" height="12" rx="1"/>
+          <line x1="20" y1="5" x2="22" y2="5"/>
+          <line x1="20" y1="17" x2="22" y2="17"/>
+          <line x1="21" y1="5" x2="21" y2="17"/>
+          <line x1="3" y1="20" x2="17" y2="20"/>
+        </svg>
+        <span class="tools-item-text">
+          <span class="tools-item-name">Area</span>
+          <span class="tools-item-desc">Rectangle dimensions &amp; area</span>
+        </span>
+      </button>
     </div>
   </div>
 
