@@ -35,8 +35,8 @@ const counters = { point: 0, line: 0, rect: 0 };
 
 // ── Tags state ─────────────────────────────────────────────────────────────
 const TAG_COLORS = [
-  '#f87171', '#fb923c', '#facc15', '#4ade80',
-  '#34d399', '#60a5fa', '#a78bfa', '#f472b6',
+  '#f87171', '#60a5fa', '#4ade80', '#facc15',
+  '#fb923c', '#34d399', '#a78bfa', '#f472b6',
 ];
 let tags               = [];   // [{id, name, color}]
 let activeTags         = new Set(); // IDs of tags applied to the next new annotation
