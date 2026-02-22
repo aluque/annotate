@@ -2,7 +2,6 @@
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const C_NORMAL   = '#f6e05e';   // yellow – default annotation color
-const C_SELECTED = '#ffffff';   // white  – selected annotation
 const C_PREVIEW  = '#68d391';   // green  – in-progress drawing
 const ZOOM_FACTOR = 4;
 const HIT_RADIUS  = 8;          // canvas px
@@ -69,6 +68,15 @@ function nextName(type) {
   const n      = String(counters[type]).padStart(3, '0');
   const prefix = document.getElementById('prefix-input').value.trim() || DEFAULT_PREFIX[type];
   return `${prefix}${n}`;
+}
+
+// Mix a 6-digit hex color toward white.  t=0 → original, t=1 → #ffffff.
+function mixWithWhite(hex, t) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const mix = c => Math.round(c + (255 - c) * t).toString(16).padStart(2, '0');
+  return `#${mix(r)}${mix(g)}${mix(b)}`;
 }
 
 function esc(s) {
@@ -451,14 +459,16 @@ function redraw() {
 }
 
 // ── Drawing helpers ────────────────────────────────────────────────────────
-// Returns the display color for an annotation: selected red, first-tag color, or default yellow.
+// Returns the display color for an annotation.
+// Selected: base color mixed 55% toward white (lighter pastel of the same hue).
+// Unselected: first tag color, or C_NORMAL yellow if untagged.
 function annotationColor(ann) {
-  if (ann.id === selectedId) return C_SELECTED;
+  let base = C_NORMAL;
   if (ann.tags && ann.tags.length > 0) {
     const tag = tags.find(t => t.id === ann.tags[0]);
-    if (tag) return tag.color;
+    if (tag) base = tag.color;
   }
-  return C_NORMAL;
+  return ann.id === selectedId ? mixWithWhite(base, 0.55) : base;
 }
 
 function drawAnnotation(ctx, ann, color, showLabel, selected = false) {
