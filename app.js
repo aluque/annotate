@@ -2,7 +2,7 @@
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const C_NORMAL   = '#f6e05e';   // yellow – default annotation color
-const C_SELECTED = '#fc8181';   // red    – selected annotation
+const C_SELECTED = '#ffffff';   // white  – selected annotation
 const C_PREVIEW  = '#68d391';   // green  – in-progress drawing
 const ZOOM_FACTOR = 4;
 const HIT_RADIUS  = 8;          // canvas px
@@ -414,7 +414,7 @@ function redraw() {
   mainCtx.drawImage(sourceImage, 0, 0, mainCanvas.width, mainCanvas.height);
 
   for (const ann of annotations) {
-    drawAnnotation(mainCtx, ann, annotationColor(ann), true);
+    drawAnnotation(mainCtx, ann, annotationColor(ann), true, ann.id === selectedId);
   }
 
   // In-progress previews
@@ -461,31 +461,32 @@ function annotationColor(ann) {
   return C_NORMAL;
 }
 
-function drawAnnotation(ctx, ann, color, showLabel) {
+function drawAnnotation(ctx, ann, color, showLabel, selected = false) {
   ctx.save();
+  const lw = selected ? 3 : 2;
   if (ann.type === 'point') {
     const p = i2c(ann.coords[0], ann.coords[1]);
-    paintDot(ctx, p.x, p.y, color, 5);
+    paintDot(ctx, p.x, p.y, color, selected ? 6 : 5);
     if (showLabel) paintLabel(ctx, ann.name, p.x + 9, p.y - 6, color);
 
   } else if (ann.type === 'line') {
     const p1 = i2c(ann.coords[0][0], ann.coords[0][1]);
     const p2 = i2c(ann.coords[1][0], ann.coords[1][1]);
     ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = lw;
     ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
-    paintDot(ctx, p1.x, p1.y, color, 4);
-    paintDot(ctx, p2.x, p2.y, color, 4);
+    paintDot(ctx, p1.x, p1.y, color, selected ? 5 : 4);
+    paintDot(ctx, p2.x, p2.y, color, selected ? 5 : 4);
     if (showLabel) paintLabel(ctx, ann.name, (p1.x+p2.x)/2 + 6, (p1.y+p2.y)/2 - 6, color);
 
   } else if (ann.type === 'rect') {
     const p1 = i2c(ann.coords[0][0], ann.coords[0][1]);
     const p2 = i2c(ann.coords[1][0], ann.coords[1][1]);
     ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = lw;
     ctx.strokeRect(p1.x, p1.y, p2.x-p1.x, p2.y-p1.y);
-    paintDot(ctx, p1.x, p1.y, color, 4);
-    paintDot(ctx, p2.x, p2.y, color, 4);
+    paintDot(ctx, p1.x, p1.y, color, selected ? 5 : 4);
+    paintDot(ctx, p2.x, p2.y, color, selected ? 5 : 4);
     if (showLabel) paintLabel(ctx, ann.name, p1.x + 5, p1.y - 6, color);
   }
   ctx.restore();
@@ -543,22 +544,23 @@ function updateZoom(cx, cy) {
 
   for (const ann of annotations) {
     const color = annotationColor(ann);
+    const sel   = ann.id === selectedId;
     zoomCtx.save();
 
     if (ann.type === 'point') {
       const p = z2c(ann.coords[0], ann.coords[1]);
-      paintDot(zoomCtx, p.x, p.y, color, 4);
+      paintDot(zoomCtx, p.x, p.y, color, sel ? 5 : 4);
     } else if (ann.type === 'line') {
       const p1 = z2c(ann.coords[0][0], ann.coords[0][1]);
       const p2 = z2c(ann.coords[1][0], ann.coords[1][1]);
-      zoomCtx.strokeStyle = color; zoomCtx.lineWidth = 2;
+      zoomCtx.strokeStyle = color; zoomCtx.lineWidth = sel ? 3 : 2;
       zoomCtx.beginPath(); zoomCtx.moveTo(p1.x, p1.y); zoomCtx.lineTo(p2.x, p2.y); zoomCtx.stroke();
-      paintDot(zoomCtx, p1.x, p1.y, color, 3);
-      paintDot(zoomCtx, p2.x, p2.y, color, 3);
+      paintDot(zoomCtx, p1.x, p1.y, color, sel ? 4 : 3);
+      paintDot(zoomCtx, p2.x, p2.y, color, sel ? 4 : 3);
     } else if (ann.type === 'rect') {
       const p1 = z2c(ann.coords[0][0], ann.coords[0][1]);
       const p2 = z2c(ann.coords[1][0], ann.coords[1][1]);
-      zoomCtx.strokeStyle = color; zoomCtx.lineWidth = 2;
+      zoomCtx.strokeStyle = color; zoomCtx.lineWidth = sel ? 3 : 2;
       zoomCtx.strokeRect(p1.x, p1.y, p2.x-p1.x, p2.y-p1.y);
     }
     zoomCtx.restore();
