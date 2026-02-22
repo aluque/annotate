@@ -169,7 +169,8 @@ Samples pixel intensity along **line** annotations at natural image resolution.
 - Renders `sourceImage` to an offscreen canvas, calls `getImageData` once per tool invocation
 - Samples nearest-neighbour at N+1 evenly-spaced points where N = `ceil(pixel length)`, capped at 10 000
 - Luminance: `0.2126r + 0.7152g + 0.0722b`
-- CSV columns: `name, position_px, x_px, y_px, r, g, b, luminance`
+- If any `NAME: length` scale lines exist, three columns per scale are inserted after `y_px`: `position_NAME, x_NAME, y_NAME` (physical units)
+- CSV columns: `name, position_px, x_px, y_px, [position_S, x_S, y_S …], r, g, b, luminance`
 - Output filename: `<imageBaseName>_profile.csv`
 
 ### Angle
