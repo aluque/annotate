@@ -24,6 +24,8 @@ let dragging = false;
 
 let mouseCanvas = null;         // {x,y} in canvas coords, or null
 let shiftHeld   = false;
+let spaceHeld   = false;
+let showLabels  = true;
 
 // Panning state
 let isPanning = false;
@@ -221,9 +223,20 @@ function fitToView() {
 function updateCoordsHud(ix, iy) {
   if (!sourceImage) { coordsHud.textContent = '—'; return; }
   const z = `${Math.round(scale * 100)}%`;
-  coordsHud.textContent = ix != null
-    ? `x: ${ix.toFixed(2)}   y: ${iy.toFixed(2)}   ·   ${z}`
-    : z;
+  if (ix == null) { coordsHud.textContent = z; return; }
+
+  let pixelLine = '';
+  try {
+    const cx = Math.max(0, Math.min(mainCanvas.width  - 1, Math.round(ix * scale)));
+    const cy = Math.max(0, Math.min(mainCanvas.height - 1, Math.round(iy * scale)));
+    const px = mainCtx.getImageData(cx, cy, 1, 1).data;
+    const lum = Math.round(0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]);
+    pixelLine = `R:${px[0].toString().padStart(3,' ')}  G:${px[1].toString().padStart(3,' ')}  B:${px[2].toString().padStart(3,' ')}  L:${lum.toString().padStart(3,' ')}`;
+  } catch (_) { /* cross-origin tainted — omit pixel row */ }
+
+  coordsHud.innerHTML =
+    `x: ${ix.toFixed(2)}   y: ${iy.toFixed(2)}   ·   ${z}` +
+    (pixelLine ? `<br>${pixelLine}` : '');
 }
 
 // ── Annotation CRUD ────────────────────────────────────────────────────────
@@ -299,8 +312,8 @@ function hitTest(cx, cy) {
 mainCanvas.addEventListener('mousedown', e => {
   if (!sourceImage) return;
 
-  // Right-click → start pan
-  if (e.button === 2) {
+  // Right-click or Space+left-click → start pan
+  if (e.button === 2 || (e.button === 0 && spaceHeld)) {
     isPanning = true;
     panStart  = { mouseX: e.clientX, mouseY: e.clientY,
                   scrollLeft: canvasArea.scrollLeft, scrollTop: canvasArea.scrollTop };
@@ -354,6 +367,8 @@ mainCanvas.addEventListener('mousemove', e => {
   mouseCanvas = cp;
   shiftHeld   = e.shiftKey;
 
+  if (spaceHeld) mainCanvas.style.cursor = 'grab';
+
   if (sourceImage) {
     const ip = c2i(cp.x, cp.y);
     updateCoordsHud(ip.x, ip.y);
@@ -364,10 +379,10 @@ mainCanvas.addEventListener('mousemove', e => {
 });
 
 mainCanvas.addEventListener('mouseup', e => {
-  if (e.button === 2 && isPanning) {
+  if (isPanning && (e.button === 2 || e.button === 0)) {
     isPanning = false;
     panStart  = null;
-    mainCanvas.style.cursor = mode === 'select' ? 'default' : 'crosshair';
+    mainCanvas.style.cursor = spaceHeld ? 'grab' : (mode === 'select' ? 'default' : 'crosshair');
     return;
   }
 
@@ -432,7 +447,7 @@ function redraw() {
   mainCtx.drawImage(sourceImage, 0, 0, mainCanvas.width, mainCanvas.height);
 
   for (const ann of annotations) {
-    drawAnnotation(mainCtx, ann, annotationColor(ann), true, ann.id === selectedId);
+    drawAnnotation(mainCtx, ann, annotationColor(ann), showLabels, ann.id === selectedId);
   }
 
   // In-progress previews
@@ -927,12 +942,20 @@ canvasArea.addEventListener('drop', e => {
   }
 });
 
-// ── Shift key tracking (for axis-constrained drawing) ──────────────────────
+// ── Shift / Space key tracking ─────────────────────────────────────────────
 document.addEventListener('keydown', e => {
   if (e.key === 'Shift' && lineP1) { shiftHeld = true; redraw(); }
+  if (e.key === ' ' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+    e.preventDefault(); // prevent page scroll
+    if (!spaceHeld) { spaceHeld = true; if (sourceImage) mainCanvas.style.cursor = 'grab'; }
+  }
 });
 document.addEventListener('keyup', e => {
   if (e.key === 'Shift' && lineP1) { shiftHeld = false; redraw(); }
+  if (e.key === ' ') {
+    spaceHeld = false;
+    if (!isPanning) mainCanvas.style.cursor = mode === 'select' ? 'default' : 'crosshair';
+  }
 });
 
 // ── Keyboard shortcuts ─────────────────────────────────────────────────────
@@ -944,6 +967,7 @@ document.addEventListener('keydown', e => {
   if (k === 'l') { setMode('line');   return; }
   if (k === 'r') { setMode('rect');   return; }
   if (k === 'f') { fitToView(); return; }
+  if (k === 'm') { showLabels = !showLabels; redraw(); return; }
   if ((e.metaKey || e.ctrlKey) && k === 'z') { e.preventDefault(); undo(); return; }
   if (e.key === 'Tab') {
     e.preventDefault();
