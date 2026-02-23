@@ -114,14 +114,14 @@ Tags are serialized by name (not by ID) in the export.
 
 ## Key behaviors
 
-- **Panning**: right-click drag
+- **Panning**: right-click drag or Space+drag (cursor shows grab/grabbing feedback)
 - **Zoom**: mouse wheel
 - **Fit to view**: `F` key — resets scale and scroll to fit the image in the viewport
 - **Shift held during line/rect drawing**: constrains to horizontal or vertical
 - **Auto-naming**: `<prefix><counter padded to 3 digits>`. Prefix defaults per type (`Point`, `Line`, `Rectangle`) but the toolbar input overrides all three.
 - **Tag selection for new annotations**: click tag in sidebar to toggle; Shift+click for range; Cmd/Ctrl+click for single toggle
 - **Drag-and-drop**: canvas-area accepts both image files and JSON files
-- **Keyboard shortcuts**: S / P / L / R (tools), Del (delete selected), Esc (cancel in-progress), F (fit), Tab / Shift+Tab (cycle annotations), Cmd/Ctrl+Z (undo)
+- **Keyboard shortcuts**: S / P / L / R (tools), Del (delete selected), Esc (cancel in-progress), F (fit), M (toggle labels), Tab / Shift+Tab (cycle annotations), Cmd/Ctrl+Z (undo)
 
 ## Undo
 
@@ -133,7 +133,7 @@ Operations that call `pushUndo()`: `addAnnotation`, `deleteAnnotation`, `clearAn
 
 - `redraw()` — clears and redraws the main canvas
 - `refreshList()` — rebuilds `#annotation-list` from scratch and re-attaches listeners
-- `updateCoordsHud(ix, iy)` — updates the coords/zoom HUD; pass `null, null` for zoom-only display
+- `updateCoordsHud(ix, iy)` — updates the coords/zoom HUD; pass `null, null` for zoom-only display. When mouse is over the canvas, a second row shows `R G B L` sampled from the main canvas, normalised to [0, 1] (silently omitted if canvas is cross-origin tainted)
 - Selection state uses class toggling on existing rows where possible (to preserve focused inputs)
 
 ## CSS themes
