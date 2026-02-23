@@ -230,8 +230,9 @@ function updateCoordsHud(ix, iy) {
     const cx = Math.max(0, Math.min(mainCanvas.width  - 1, Math.round(ix * scale)));
     const cy = Math.max(0, Math.min(mainCanvas.height - 1, Math.round(iy * scale)));
     const px = mainCtx.getImageData(cx, cy, 1, 1).data;
-    const lum = Math.round(0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]);
-    pixelLine = `R:${px[0].toString().padStart(3,' ')}  G:${px[1].toString().padStart(3,' ')}  B:${px[2].toString().padStart(3,' ')}  L:${lum.toString().padStart(3,' ')}`;
+    const lum = 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2];
+    const fmt = v => (v / 255).toFixed(3);
+    pixelLine = `R:${fmt(px[0])}  G:${fmt(px[1])}  B:${fmt(px[2])}  L:${fmt(lum)}`;
   } catch (_) { /* cross-origin tainted — omit pixel row */ }
 
   coordsHud.innerHTML =
