@@ -83,6 +83,16 @@ function esc(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function sanitizeHexColor(value, fallback = TAG_COLORS[0]) {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  return /^#[0-9a-fA-F]{6}$/.test(trimmed) ? trimmed.toLowerCase() : fallback;
+}
+
+function annotationHasTag(ann, tagId) {
+  return Array.isArray(ann.tags) && ann.tags.includes(tagId);
+}
+
 // Coordinate helpers
 function c2i(cx, cy) { return { x: cx / scale, y: cy / scale }; }
 function i2c(ix, iy) { return { x: ix * scale, y: iy * scale }; }
@@ -614,7 +624,7 @@ function getTagDots(annTagIds) {
   const dots = annTagIds
     .map(id => tags.find(t => t.id === id))
     .filter(Boolean)
-    .map(t => `<span class="ann-tag-dot" style="background:${t.color}" title="${esc(t.name)}"></span>`)
+    .map(t => `<span class="ann-tag-dot" style="background:${sanitizeHexColor(t.color)}" title="${esc(t.name)}"></span>`)
     .join('');
   return dots ? `<span class="ann-tag-dots">${dots}</span>` : '';
 }
@@ -657,7 +667,7 @@ function refreshList() {
         for (const tag of tags) {
           const chip = document.createElement('span');
           chip.className = 'tag-editor-chip' + (annTagSet.has(tag.id) ? ' has-tag' : '');
-          chip.innerHTML = `<span class="tag-editor-dot" style="background:${tag.color}"></span>${esc(tag.name)}`;
+          chip.innerHTML = `<span class="tag-editor-dot" style="background:${sanitizeHexColor(tag.color)}"></span>${esc(tag.name)}`;
           chip.addEventListener('mousedown', e => e.stopPropagation());
           chip.addEventListener('click', e => {
             e.stopPropagation();
@@ -746,7 +756,7 @@ function refreshTagsList() {
     item.className = 'tag-item' + (activeTags.has(tag.id) ? ' active' : '');
     item.dataset.id = tag.id;
     item.innerHTML = `
-      <span class="tag-dot" style="background:${tag.color}"></span>
+      <span class="tag-dot" style="background:${sanitizeHexColor(tag.color)}"></span>
       <span class="tag-name">${esc(tag.name)}</span>
       <button class="tag-del-btn" title="Delete tag">×</button>
     `;
@@ -797,7 +807,7 @@ function startAddTag() {
   const color   = TAG_COLORS[tags.length % TAG_COLORS.length];
   const wrapper = document.createElement('div');
   wrapper.className = 'tag-item';
-  wrapper.innerHTML = `<span class="tag-dot" style="background:${color}"></span>`;
+  wrapper.innerHTML = `<span class="tag-dot" style="background:${sanitizeHexColor(color)}"></span>`;
   const inp = document.createElement('input');
   inp.type        = 'text';
   inp.className   = 'tag-new-input';
@@ -858,7 +868,11 @@ function importJSONFile(file) {
       const data = JSON.parse(e.target.result);
       pushUndo();
       // Restore tags
-      tags = (data.tags || []).map(t => ({ id: uid(), name: t.name, color: t.color || TAG_COLORS[0] }));
+      tags = (data.tags || []).map(t => ({
+        id: uid(),
+        name: t.name,
+        color: sanitizeHexColor(t.color, TAG_COLORS[0]),
+      }));
       activeTags.clear();
       // Restore annotations, mapping tag names back to new IDs
       const list = data.annotations || (Array.isArray(data) ? data : []);
@@ -1169,7 +1183,7 @@ function runExtract(tagId) {
 
   for (const ann of annotations) {
     if (ann.type !== 'point') continue;
-    if (tagId && !ann.tags.includes(tagId)) continue;
+    if (tagId && !annotationHasTag(ann, tagId)) continue;
     const c = ann.coords;
     for (const ax of axes) {
       let v = ax.a + (ax.b - ax.a) *
@@ -1223,7 +1237,7 @@ function runMeasure(tagId) {
 
   for (const ann of annotations) {
     if (ann.type !== 'line') continue;
-    if (tagId && !ann.tags.includes(tagId)) continue;
+    if (tagId && !annotationHasTag(ann, tagId)) continue;
     const c   = ann.coords;
     const dx  = c[1][0] - c[0][0], dy = c[1][1] - c[0][1];
     const pxl = Math.sqrt(dx * dx + dy * dy);
@@ -1250,7 +1264,7 @@ function runProfile(tagId) {
 
   const lines = annotations.filter(ann => {
     if (ann.type !== 'line') return false;
-    if (tagId && !ann.tags.includes(tagId)) return false;
+    if (tagId && !annotationHasTag(ann, tagId)) return false;
     return true;
   });
 
@@ -1332,7 +1346,7 @@ function runProfile(tagId) {
 function runAngle(tagId) {
   const lines = annotations.filter(ann => {
     if (ann.type !== 'line') return false;
-    if (tagId && !ann.tags.includes(tagId)) return false;
+    if (tagId && !annotationHasTag(ann, tagId)) return false;
     return true;
   });
 
@@ -1377,7 +1391,7 @@ function runDistances(tagId) {
 
   const points = annotations.filter(ann => {
     if (ann.type !== 'point') return false;
-    if (tagId && !ann.tags.includes(tagId)) return false;
+    if (tagId && !annotationHasTag(ann, tagId)) return false;
     return true;
   });
 
@@ -1425,7 +1439,7 @@ function runArea(tagId) {
 
   const rects = annotations.filter(ann => {
     if (ann.type !== 'rect') return false;
-    if (tagId && !ann.tags.includes(tagId)) return false;
+    if (tagId && !annotationHasTag(ann, tagId)) return false;
     return true;
   });
 
