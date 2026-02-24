@@ -28,18 +28,18 @@ To define a scale for measuring distances (for example a line in the image that 
 All tools export a CSV file.
 
 ## FAQ
-**Q:** What coding agent did you use?
+**Q:** What coding agent did you use?  
 **A:** Claude Code.
 
-**Q:** Is the code totally AI generated.
+**Q:** Is the code totally AI generated.  
 **A:** Yes, the app code is fully AI generated. I am not fluent with CSS and JS. I wrote the python scripts in the `scripts/` to implement common uses of the downloaded JSON but then I thought that I can ask Claude to rewrite them in JS and incorporate them into the app. Then I added more possibly useful tools.
 
-**Q:** How long did it take?
+**Q:** How long did it take?  
 **A:** All together a few hours in Claude sessions but I was typically doing other stuff at the same time and interacting with Claude about every 10 minutes or so.
 
-**Q:** Did you use Claude Code for something similar?
+**Q:** Did you use Claude Code for something similar?  
 **A:** Yes! I ported [QtPlaskin](https://github.com/aluque/qtplaskin), an old python application to analyze chemical data, to run inside the browser using JS. See it live here: https://aluque.github.io/jsplaskin/ .
 
-**Q:** Is this text AI generated?
+**Q:** Is this text AI generated?  
 **A:** No, no AI slop here. I wrote this document without AI intervention.
 
