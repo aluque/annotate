@@ -411,12 +411,13 @@ mainCanvas.addEventListener('mouseleave', () => {
 
 mainCanvas.addEventListener('contextmenu', e => e.preventDefault());
 
+let wheelRafId = null;
 mainCanvas.addEventListener('wheel', e => {
   e.preventDefault();
   if (!sourceImage) return;
 
   const factor   = e.deltaY < 0 ? 1.05 : 1 / 1.05;
-  const newScale = Math.max(minScale, Math.min(32, scale * factor));
+  const newScale = Math.max(minScale, Math.min(4, scale * factor));
   if (newScale === scale) return;
 
   // Image point under the cursor (in image px)
@@ -430,7 +431,6 @@ mainCanvas.addEventListener('wheel', e => {
   mainCanvas.width  = Math.round(imgW * scale);
   mainCanvas.height = Math.round(imgH * scale);
   updateCanvasPadding();
-  redraw();
 
   // Scroll so the image point under the cursor stays fixed.
   // updateCanvasPadding() sets canvasWrap's margin, so offsetLeft/offsetTop
@@ -439,6 +439,11 @@ mainCanvas.addEventListener('wheel', e => {
   canvasArea.scrollLeft = canvasWrap.offsetLeft + imgX * scale - (e.clientX - areaRect.left);
   canvasArea.scrollTop  = canvasWrap.offsetTop  + imgY * scale - (e.clientY - areaRect.top);
   updateCoordsHud(imgX, imgY);
+
+  // Batch redraws to one per animation frame so rapid wheel events don't
+  // queue multiple expensive drawImage+annotation passes.
+  if (wheelRafId) cancelAnimationFrame(wheelRafId);
+  wheelRafId = requestAnimationFrame(() => { wheelRafId = null; redraw(); });
 }, { passive: false });
 
 // ── Main canvas render ─────────────────────────────────────────────────────
