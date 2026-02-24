@@ -1204,6 +1204,7 @@ function runExtract(tagId) {
 
   const col = {};
   for (const ax of axes) col[ax.name] = [];
+  const names = [];
   let count = 0;
 
   for (const ann of annotations) {
@@ -1216,6 +1217,7 @@ function runExtract(tagId) {
       if (ax.islog) v = Math.exp(v);
       col[ax.name].push(v);
     }
+    names.push(ann.name);
     count++;
   }
 
@@ -1224,10 +1226,10 @@ function runExtract(tagId) {
   }
 
   const keys = Object.keys(col).sort();
-  let csv = keys.map(csvSanitize).join(',') + '\n';
+  let csv = ['name', ...keys.map(csvSanitize)].join(',') + '\n';
   const n = col[keys[0]].length;
   for (let i = 0; i < n; i++) {
-    csv += keys.map(k => col[k][i]).join(',') + '\n';
+    csv += [csvSanitize(names[i]), ...keys.map(k => col[k][i])].join(',') + '\n';
   }
   return { csv, filename: `${imageBaseName}_extract.csv` };
 }
