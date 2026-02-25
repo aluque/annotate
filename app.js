@@ -775,9 +775,8 @@ mainCanvas.addEventListener('touchmove', e => {
     mouseCanvas = cp;
     const ip = c2i(cp.x, cp.y);
     updateCoordsHud(ip.x, ip.y);
-    updateZoom(cp.x, cp.y);
-
     if (dragTarget && dragStart) applyDragMove(cp);
+    updateZoom(cp.x, cp.y);
 
     if (dragging || lineP1) redraw();
   }
