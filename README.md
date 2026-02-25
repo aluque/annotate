@@ -43,3 +43,7 @@ All tools export a CSV file.
 **Q:** Is this text AI generated?  
 **A:** No, no AI slop here. I wrote this document without AI intervention.
 
+**Q:** Can I download this app to run offline?  
+**A:** Yes. Clone/download the repository and open `index.html` with your browser.
+
+
