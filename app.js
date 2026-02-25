@@ -485,15 +485,8 @@ mainCanvas.addEventListener('mousedown', e => {
   }
 
   if (mode === 'line') {
-    if (!lineP1) {
-      lineP1 = ip;
-      redraw();
-    } else {
-      const ip2 = e.shiftKey ? constrainAxis(lineP1, ip) : ip;
-      addAnnotation({ id: uid(), type: 'line', name: nextName('line'),
-        coords: [[lineP1.x, lineP1.y], [ip2.x, ip2.y]] });
-      lineP1 = null;
-    }
+    lineP1   = ip;
+    dragging = true;
     return;
   }
 
@@ -582,6 +575,19 @@ mainCanvas.addEventListener('mouseup', e => {
     return;
   }
 
+  if (mode === 'line' && dragging && lineP1) {
+    const cp = getCanvasPos(e);
+    const ip = c2i(cp.x, cp.y);
+    const ip2 = e.shiftKey ? constrainAxis(lineP1, ip) : ip;
+    if (Math.hypot(ip2.x - lineP1.x, ip2.y - lineP1.y) > 2) {
+      addAnnotation({ id: uid(), type: 'line', name: nextName('line'),
+        coords: [[lineP1.x, lineP1.y], [ip2.x, ip2.y]] });
+    }
+    lineP1   = null;
+    dragging = false;
+    redraw();
+  }
+
   if (mode === 'rect' && dragging && rectP1) {
     const cp = getCanvasPos(e);
     const ip = c2i(cp.x, cp.y);
@@ -652,8 +658,8 @@ mainCanvas.addEventListener('touchstart', e => {
     if (dragTarget && !dragMoved) {
       dragTarget = dragPart = dragStart = dragOrigCoords = null;
     }
-    // Cancel rect-in-progress
-    if (dragging) { rectP1 = null; dragging = false; redraw(); }
+    // Cancel line/rect-in-progress
+    if (dragging) { lineP1 = null; rectP1 = null; dragging = false; redraw(); }
 
     const t1 = e.touches[0], t2 = e.touches[1];
     touchPinchDist0  = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
@@ -686,14 +692,8 @@ mainCanvas.addEventListener('touchstart', e => {
       addAnnotation({ id: uid(), type: 'point', name: nextName('point'),
                       coords: [ip.x, ip.y] });
     } else if (mode === 'line') {
-      if (!lineP1) {
-        lineP1 = ip;
-        redraw();
-      } else {
-        addAnnotation({ id: uid(), type: 'line', name: nextName('line'),
-                        coords: [[lineP1.x, lineP1.y], [ip.x, ip.y]] });
-        lineP1 = null;
-      }
+      lineP1   = ip;
+      dragging = true;
     } else if (mode === 'rect') {
       rectP1   = ip;
       dragging = true;
@@ -792,6 +792,19 @@ mainCanvas.addEventListener('touchend', e => {
       dragMoved  = false;
     }
 
+    if (mode === 'line' && dragging && lineP1) {
+      const touch = e.changedTouches[0];
+      const cp = getCanvasPos(touch);
+      const ip = c2i(cp.x, cp.y);
+      if (Math.hypot(ip.x - lineP1.x, ip.y - lineP1.y) > 2) {
+        addAnnotation({ id: uid(), type: 'line', name: nextName('line'),
+                        coords: [[lineP1.x, lineP1.y], [ip.x, ip.y]] });
+      }
+      lineP1   = null;
+      dragging = false;
+      redraw();
+    }
+
     if (mode === 'rect' && dragging && rectP1) {
       const touch = e.changedTouches[0];
       const cp = getCanvasPos(touch);
@@ -822,7 +835,7 @@ mainCanvas.addEventListener('touchcancel', e => {
   if (dragTarget && !dragMoved) {
     dragTarget = dragPart = dragStart = dragOrigCoords = null;
   }
-  if (dragging) { rectP1 = null; dragging = false; }
+  if (dragging) { lineP1 = null; rectP1 = null; dragging = false; }
   redraw();
 }, { passive: false });
 
