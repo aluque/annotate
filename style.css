@@ -500,6 +500,7 @@ body {
 
 #main-canvas {
   display: block;
+  touch-action: none;
 }
 
 #coords-hud {

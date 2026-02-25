@@ -39,6 +39,12 @@ let showLabels  = true;
 let isPanning = false;
 let panStart  = null;           // {mouseX, mouseY, scrollLeft, scrollTop}
 
+// Touch / pinch state
+let touchIsPinching     = false;
+let touchPinchDist0     = null;   // finger distance at pinch start
+let touchPinchScale0    = null;   // scale at pinch start
+let touchPinchImgAnchor = null;   // image coords under midpoint at pinch start
+
 // Name counters
 const counters = { point: 0, line: 0, rect: 0 };
 
@@ -633,6 +639,191 @@ mainCanvas.addEventListener('wheel', e => {
     wheelAccum = 0;
     zoomBy(factor, wheelPivotX, wheelPivotY);
   });
+}, { passive: false });
+
+// ── Touch handlers ──────────────────────────────────────────────────────────
+
+mainCanvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (!sourceImage) return;
+
+  if (e.touches.length === 2) {
+    // Cancel non-moved single-finger drag so it doesn't orphan state
+    if (dragTarget && !dragMoved) {
+      dragTarget = dragPart = dragStart = dragOrigCoords = null;
+    }
+    // Cancel rect-in-progress
+    if (dragging) { rectP1 = null; dragging = false; redraw(); }
+
+    const t1 = e.touches[0], t2 = e.touches[1];
+    touchPinchDist0  = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+    touchPinchScale0 = scale;
+    const midCP = getCanvasPos({ clientX: (t1.clientX + t2.clientX) / 2,
+                                  clientY: (t1.clientY + t2.clientY) / 2 });
+    touchPinchImgAnchor = c2i(midCP.x, midCP.y);
+    touchIsPinching = true;
+    return;
+  }
+
+  if (e.touches.length === 1 && !touchIsPinching) {
+    const touch = e.touches[0];
+    const cp = getCanvasPos(touch);
+    const ip = c2i(cp.x, cp.y);
+
+    if (mode === 'select') {
+      const hit = hitTestWithPart(cp.x, cp.y);
+      if (hit) {
+        selectAnnotation(hit.ann.id);
+        dragTarget     = hit.ann;
+        dragPart       = hit.part;
+        dragStart      = { canvasX: cp.x, canvasY: cp.y };
+        dragOrigCoords = JSON.parse(JSON.stringify(hit.ann.coords));
+        dragMoved      = false;
+      } else {
+        selectAnnotation(null);
+      }
+    } else if (mode === 'point') {
+      addAnnotation({ id: uid(), type: 'point', name: nextName('point'),
+                      coords: [ip.x, ip.y] });
+    } else if (mode === 'line') {
+      if (!lineP1) {
+        lineP1 = ip;
+        redraw();
+      } else {
+        addAnnotation({ id: uid(), type: 'line', name: nextName('line'),
+                        coords: [[lineP1.x, lineP1.y], [ip.x, ip.y]] });
+        lineP1 = null;
+      }
+    } else if (mode === 'rect') {
+      rectP1   = ip;
+      dragging = true;
+    }
+  }
+}, { passive: false });
+
+mainCanvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (!sourceImage) return;
+
+  if (e.touches.length === 2 && touchIsPinching) {
+    const t1 = e.touches[0], t2 = e.touches[1];
+    const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+    const midX = (t1.clientX + t2.clientX) / 2;
+    const midY = (t1.clientY + t2.clientY) / 2;
+
+    const newScale = Math.max(minScale, Math.min(4,
+      touchPinchScale0 * (dist / touchPinchDist0)));
+
+    if (newScale !== scale) {
+      scale = newScale;
+      mainCanvas.width  = Math.round(imgW * scale);
+      mainCanvas.height = Math.round(imgH * scale);
+      updateCanvasPadding();
+      redraw();
+      const areaRect = canvasArea.getBoundingClientRect();
+      canvasArea.scrollLeft = canvasWrap.offsetLeft
+        + touchPinchImgAnchor.x * scale - (midX - areaRect.left);
+      canvasArea.scrollTop  = canvasWrap.offsetTop
+        + touchPinchImgAnchor.y * scale - (midY - areaRect.top);
+      updateCoordsHud(null, null);
+    }
+    return;
+  }
+
+  if (e.touches.length === 1 && !touchIsPinching) {
+    const touch = e.touches[0];
+    const cp = getCanvasPos(touch);
+    mouseCanvas = cp;
+
+    if (dragTarget && dragStart) {
+      const dx = cp.x - dragStart.canvasX;
+      const dy = cp.y - dragStart.canvasY;
+      if (dragMoved || Math.hypot(dx, dy) >= 2) {
+        if (!dragMoved) { pushUndo(); dragMoved = true; }
+        const idx = dx / scale, idy = dy / scale;
+        const orig = dragOrigCoords, ann = dragTarget;
+        if (ann.type === 'point') {
+          ann.coords = [orig[0] + idx, orig[1] + idy];
+        } else if (ann.type === 'line') {
+          if (dragPart === 'p1')
+            ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [...orig[1]]];
+          else if (dragPart === 'p2')
+            ann.coords = [[...orig[0]], [orig[1][0]+idx, orig[1][1]+idy]];
+          else
+            ann.coords = [[orig[0][0]+idx, orig[0][1]+idy],
+                          [orig[1][0]+idx, orig[1][1]+idy]];
+        } else if (ann.type === 'rect') {
+          if (dragPart === 'p1')
+            ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [...orig[1]]];
+          else if (dragPart === 'p2')
+            ann.coords = [[...orig[0]], [orig[1][0]+idx, orig[1][1]+idy]];
+          else
+            ann.coords = [[orig[0][0]+idx, orig[0][1]+idy],
+                          [orig[1][0]+idx, orig[1][1]+idy]];
+        }
+        redraw();
+      }
+    }
+
+    if (dragging || lineP1) redraw();
+  }
+}, { passive: false });
+
+mainCanvas.addEventListener('touchend', e => {
+  e.preventDefault();
+
+  if (e.touches.length === 1 && touchIsPinching) {
+    touchIsPinching     = false;
+    touchPinchDist0     = null;
+    touchPinchScale0    = null;
+    touchPinchImgAnchor = null;
+    return;
+  }
+
+  if (e.touches.length === 0) {
+    touchIsPinching     = false;
+    touchPinchDist0     = null;
+    touchPinchScale0    = null;
+    touchPinchImgAnchor = null;
+
+    if (dragTarget) {
+      if (dragMoved) refreshList();
+      dragTarget = dragPart = dragStart = dragOrigCoords = null;
+      dragMoved  = false;
+    }
+
+    if (mode === 'rect' && dragging && rectP1) {
+      const touch = e.changedTouches[0];
+      const cp = getCanvasPos(touch);
+      const ip = c2i(cp.x, cp.y);
+      const x1 = Math.min(rectP1.x, ip.x), y1 = Math.min(rectP1.y, ip.y);
+      const x2 = Math.max(rectP1.x, ip.x), y2 = Math.max(rectP1.y, ip.y);
+      if (x2 - x1 > 2 && y2 - y1 > 2) {
+        addAnnotation({ id: uid(), type: 'rect', name: nextName('rect'),
+                        coords: [[x1, y1], [x2, y2]] });
+      }
+      rectP1   = null;
+      dragging = false;
+      redraw();
+    }
+
+    mouseCanvas = null;
+    redraw();
+  }
+}, { passive: false });
+
+mainCanvas.addEventListener('touchcancel', e => {
+  e.preventDefault();
+  touchIsPinching     = false;
+  touchPinchDist0     = null;
+  touchPinchScale0    = null;
+  touchPinchImgAnchor = null;
+  mouseCanvas         = null;
+  if (dragTarget && !dragMoved) {
+    dragTarget = dragPart = dragStart = dragOrigCoords = null;
+  }
+  if (dragging) { rectP1 = null; dragging = false; }
+  redraw();
 }, { passive: false });
 
 // ── Main canvas render ─────────────────────────────────────────────────────
