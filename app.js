@@ -468,11 +468,25 @@ mainCanvas.addEventListener('mousedown', e => {
     }
     if (hit) {
       selectAnnotation(hit.ann.id);
+      // Snap point / endpoint / corner to cursor so the zoom crosshair stays accurate.
+      // Whole-body line/rect drags keep the offset so the body doesn't jump.
+      const isHandle = hit.ann.type === 'point' || hit.part !== 'whole';
+      if (isHandle) {
+        pushUndo();
+        if (hit.ann.type === 'point') {
+          hit.ann.coords = [ip.x, ip.y];
+        } else if (hit.part === 'p1') {
+          hit.ann.coords[0] = [ip.x, ip.y];
+        } else {
+          hit.ann.coords[1] = [ip.x, ip.y];
+        }
+      }
       dragTarget     = hit.ann;
       dragPart       = hit.part;
       dragStart      = { canvasX: cp.x, canvasY: cp.y };
       dragOrigCoords = JSON.parse(JSON.stringify(hit.ann.coords));
-      dragMoved      = false;
+      dragMoved      = isHandle;
+      if (isHandle) redraw();
     } else {
       selectAnnotation(null);
     }
@@ -680,11 +694,23 @@ mainCanvas.addEventListener('touchstart', e => {
       const hit = hitTestWithPart(cp.x, cp.y);
       if (hit) {
         selectAnnotation(hit.ann.id);
+        const isHandle = hit.ann.type === 'point' || hit.part !== 'whole';
+        if (isHandle) {
+          pushUndo();
+          if (hit.ann.type === 'point') {
+            hit.ann.coords = [ip.x, ip.y];
+          } else if (hit.part === 'p1') {
+            hit.ann.coords[0] = [ip.x, ip.y];
+          } else {
+            hit.ann.coords[1] = [ip.x, ip.y];
+          }
+        }
         dragTarget     = hit.ann;
         dragPart       = hit.part;
         dragStart      = { canvasX: cp.x, canvasY: cp.y };
         dragOrigCoords = JSON.parse(JSON.stringify(hit.ann.coords));
-        dragMoved      = false;
+        dragMoved      = isHandle;
+        if (isHandle) redraw();
       } else {
         selectAnnotation(null);
       }
