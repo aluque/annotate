@@ -81,6 +81,14 @@
         </svg>
         Export JSON
       </button>
+      <button class="file-dropdown-item" onclick="downloadAnnotatedImage()">
+        <svg class="file-item-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" stroke="none"/>
+          <polyline points="21 15 16 10 5 21"/>
+        </svg>
+        Save Image
+      </button>
       <div class="file-dropdown-divider"></div>
       <button class="file-dropdown-item file-item-danger" onclick="clearAnnotations()">
         <svg class="file-item-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -269,6 +277,8 @@
     <span class="sb-key">M</span> Labels &nbsp;
     <span class="sb-key">Tab</span> Next &nbsp;
     <span class="sb-key">⌘Z</span> Undo &nbsp;
+    <span class="sb-key">⌘Y</span> Redo &nbsp;
+    <span class="sb-key">+/-</span> Zoom &nbsp;
     <span class="sb-key">R-drag</span> Pan
   </span>
   <span id="status-hint"></span>

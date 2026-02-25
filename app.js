@@ -1,7 +1,7 @@
 'use strict';
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const C_NORMAL   = '#f6e05e';   // yellow – default annotation color
+const C_NORMAL   = '#94a3b8';   // slate – default annotation color (no tag)
 const C_PREVIEW  = '#68d391';   // green  – in-progress drawing
 const ZOOM_FACTOR = 4;
 const HIT_RADIUS  = 8;          // canvas px
@@ -9,6 +9,7 @@ const HIT_RADIUS  = 8;          // canvas px
 // ── State ──────────────────────────────────────────────────────────────────
 let annotations  = [];
 let selectedId   = null;
+let selectedIds  = new Set();  // for multi-select
 let mode         = 'select';
 let sourceImage  = null;        // HTMLImageElement
 let imageBaseName = 'annotations'; // derived from the loaded image filename
@@ -21,6 +22,13 @@ let minScale = 0.1;             // updated by fitCanvas()
 let lineP1   = null;            // {x,y} in image coords
 let rectP1   = null;
 let dragging = false;
+
+// Annotation drag-move state
+let dragTarget     = null;
+let dragPart       = null;      // 'whole' | 'p1' | 'p2'
+let dragStart      = null;      // {canvasX, canvasY}
+let dragOrigCoords = null;      // deep-copy of ann.coords at drag start
+let dragMoved      = false;
 
 let mouseCanvas = null;         // {x,y} in canvas coords, or null
 let shiftHeld   = false;
@@ -41,12 +49,17 @@ const TAG_COLORS = [
 ];
 let tags               = [];   // [{id, name, color}]
 let activeTags         = new Set(); // IDs of tags applied to the next new annotation
+let hiddenTagIds       = new Set(); // IDs of tags whose annotations are hidden
 let tagAnchorId        = null;     // anchor for shift-click range selection
 let expandedAnnotationId = null;   // annotation whose tag editor is open
 
-// Undo stack
+// Undo / redo stacks
 const undoStack = [];
+const redoStack = [];
 const UNDO_LIMIT = 50;
+
+// Color picker popover reference
+let colorPickerPopover = null;
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const mainCanvas = document.getElementById('main-canvas');
@@ -95,6 +108,12 @@ function annotationHasTag(ann, tagId) {
   return Array.isArray(ann.tags) && ann.tags.includes(tagId);
 }
 
+/** Returns false if every tag on this annotation is hidden. Untagged annotations are always visible. */
+function isAnnotationVisible(ann) {
+  if (!ann.tags || ann.tags.length === 0) return true;
+  return !ann.tags.some(tid => hiddenTagIds.has(tid));
+}
+
 // Coordinate helpers
 function c2i(cx, cy) { return { x: cx / scale, y: cy / scale }; }
 function i2c(ix, iy) { return { x: ix * scale, y: iy * scale }; }
@@ -118,10 +137,17 @@ function pushUndo() {
     counters:    { ...counters },
   });
   if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  redoStack.length = 0; // clear redo on any new action
 }
 
 function undo() {
   if (undoStack.length === 0) return;
+  // Save current state to redoStack before undoing
+  redoStack.push({
+    annotations: JSON.parse(JSON.stringify(annotations)),
+    tags:        JSON.parse(JSON.stringify(tags)),
+    counters:    { ...counters },
+  });
   const state = undoStack.pop();
   annotations          = state.annotations;
   tags                 = state.tags;
@@ -129,10 +155,38 @@ function undo() {
   counters.line        = state.counters.line;
   counters.rect        = state.counters.rect;
   selectedId           = null;
+  selectedIds          = new Set();
   expandedAnnotationId = null;
-  // Drop any activeTags that no longer exist
+  // Drop any activeTags / hiddenTagIds that no longer exist
   const tagIds = new Set(tags.map(t => t.id));
-  for (const id of activeTags) if (!tagIds.has(id)) activeTags.delete(id);
+  for (const id of activeTags)    if (!tagIds.has(id)) activeTags.delete(id);
+  for (const id of hiddenTagIds)  if (!tagIds.has(id)) hiddenTagIds.delete(id);
+  refreshTagsList();
+  refreshList();
+  redraw();
+}
+
+function redo() {
+  if (redoStack.length === 0) return;
+  // Push current state to undoStack without clearing redoStack
+  undoStack.push({
+    annotations: JSON.parse(JSON.stringify(annotations)),
+    tags:        JSON.parse(JSON.stringify(tags)),
+    counters:    { ...counters },
+  });
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  const state = redoStack.pop();
+  annotations          = state.annotations;
+  tags                 = state.tags;
+  counters.point       = state.counters.point;
+  counters.line        = state.counters.line;
+  counters.rect        = state.counters.rect;
+  selectedId           = null;
+  selectedIds          = new Set();
+  expandedAnnotationId = null;
+  const tagIds = new Set(tags.map(t => t.id));
+  for (const id of activeTags)   if (!tagIds.has(id)) activeTags.delete(id);
+  for (const id of hiddenTagIds) if (!tagIds.has(id)) hiddenTagIds.delete(id);
   refreshTagsList();
   refreshList();
   redraw();
@@ -218,6 +272,27 @@ function fitToView() {
   updateCoordsHud(null, null);
 }
 
+/** Zoom by a multiplicative factor, keeping the given client-space point fixed. */
+function zoomBy(factor, pivotClientX, pivotClientY) {
+  if (!sourceImage) return;
+  const newScale = Math.max(minScale, Math.min(4, scale * factor));
+  if (newScale === scale) return;
+  const canvasRect   = mainCanvas.getBoundingClientRect();
+  const mouseCanvasX = pivotClientX - canvasRect.left;
+  const mouseCanvasY = pivotClientY - canvasRect.top;
+  const imgX = mouseCanvasX / scale;
+  const imgY = mouseCanvasY / scale;
+  scale = newScale;
+  mainCanvas.width  = Math.round(imgW * scale);
+  mainCanvas.height = Math.round(imgH * scale);
+  updateCanvasPadding();
+  redraw();
+  const areaRect = canvasArea.getBoundingClientRect();
+  canvasArea.scrollLeft = canvasWrap.offsetLeft + imgX * scale - (pivotClientX - areaRect.left);
+  canvasArea.scrollTop  = canvasWrap.offsetTop  + imgY * scale - (pivotClientY - areaRect.top);
+  updateCoordsHud(null, null);
+}
+
 // Update the coordinate / zoom HUD.  Call with (ix, iy) when the mouse is
 // over the canvas, or (null, null) to show only the zoom level.
 function updateCoordsHud(ix, iy) {
@@ -245,7 +320,8 @@ function addAnnotation(ann) {
   pushUndo();
   ann.tags = [...activeTags];
   annotations.push(ann);
-  selectedId = ann.id;
+  selectedId  = ann.id;
+  selectedIds = new Set([ann.id]);
   refreshList();
   redraw();
   scrollToSelected();
@@ -255,19 +331,36 @@ function deleteAnnotation(id) {
   pushUndo();
   annotations = annotations.filter(a => a.id !== id);
   if (selectedId === id) selectedId = null;
+  selectedIds.delete(id);
   if (expandedAnnotationId === id) expandedAnnotationId = null;
   refreshList();
   redraw();
 }
 
 function selectAnnotation(id) {
-  selectedId = id;
+  selectedId  = id;
+  selectedIds = new Set(id ? [id] : []);
   // Update classes in-place so a focused input isn't destroyed by a DOM rebuild
   annList.querySelectorAll('.ann-item').forEach(el => {
-    el.classList.toggle('selected', el.dataset.id === id);
+    el.classList.toggle('selected', selectedIds.has(el.dataset.id));
   });
   redraw();
   if (id) scrollToSelected();
+}
+
+/** Toggle a single annotation in/out of the multi-select set. */
+function toggleSelectAnnotation(id) {
+  if (selectedIds.has(id)) {
+    selectedIds.delete(id);
+    if (selectedId === id) selectedId = selectedIds.size > 0 ? [...selectedIds][0] : null;
+  } else {
+    selectedIds.add(id);
+    selectedId = id;
+  }
+  annList.querySelectorAll('.ann-item').forEach(el => {
+    el.classList.toggle('selected', selectedIds.has(el.dataset.id));
+  });
+  redraw();
 }
 
 function scrollToSelected() {
@@ -287,6 +380,7 @@ function distPointToSegment(px, py, ax, ay, bx, by) {
 function hitTest(cx, cy) {
   for (let i = annotations.length - 1; i >= 0; i--) {
     const a = annotations[i];
+    if (!isAnnotationVisible(a)) continue;
     if (a.type === 'point') {
       const p = i2c(a.coords[0], a.coords[1]);
       if (Math.hypot(cx-p.x, cy-p.y) <= HIT_RADIUS) return a;
@@ -309,6 +403,41 @@ function hitTest(cx, cy) {
   return null;
 }
 
+/** Like hitTest but also returns which part was hit for drag-move purposes. */
+function hitTestWithPart(cx, cy) {
+  for (let i = annotations.length - 1; i >= 0; i--) {
+    const a = annotations[i];
+    if (!isAnnotationVisible(a)) continue;
+    if (a.type === 'point') {
+      const p = i2c(a.coords[0], a.coords[1]);
+      if (Math.hypot(cx-p.x, cy-p.y) <= HIT_RADIUS) return { ann: a, part: 'whole' };
+    } else if (a.type === 'line') {
+      const p1 = i2c(a.coords[0][0], a.coords[0][1]);
+      const p2 = i2c(a.coords[1][0], a.coords[1][1]);
+      if (Math.hypot(cx-p1.x, cy-p1.y) <= HIT_RADIUS) return { ann: a, part: 'p1' };
+      if (Math.hypot(cx-p2.x, cy-p2.y) <= HIT_RADIUS) return { ann: a, part: 'p2' };
+      if (distPointToSegment(cx, cy, p1.x, p1.y, p2.x, p2.y) <= HIT_RADIUS) return { ann: a, part: 'whole' };
+    } else if (a.type === 'rect') {
+      const p1 = i2c(a.coords[0][0], a.coords[0][1]);
+      const p2 = i2c(a.coords[1][0], a.coords[1][1]);
+      // Corner dots are resize handles — check them first
+      if (Math.hypot(cx-p1.x, cy-p1.y) <= HIT_RADIUS) return { ann: a, part: 'p1' };
+      if (Math.hypot(cx-p2.x, cy-p2.y) <= HIT_RADIUS) return { ann: a, part: 'p2' };
+      // Edges move the whole rect
+      const minX = Math.min(p1.x, p2.x), maxX = Math.max(p1.x, p2.x);
+      const minY = Math.min(p1.y, p2.y), maxY = Math.max(p1.y, p2.y);
+      const onV  = cy >= minY - HIT_RADIUS && cy <= maxY + HIT_RADIUS;
+      const onH  = cx >= minX - HIT_RADIUS && cx <= maxX + HIT_RADIUS;
+      const nearL = Math.abs(cx - p1.x) <= HIT_RADIUS && onV;
+      const nearR = Math.abs(cx - p2.x) <= HIT_RADIUS && onV;
+      const nearT = Math.abs(cy - p1.y) <= HIT_RADIUS && onH;
+      const nearB = Math.abs(cy - p2.y) <= HIT_RADIUS && onH;
+      if (nearL || nearR || nearT || nearB) return { ann: a, part: 'whole' };
+    }
+  }
+  return null;
+}
+
 // ── Canvas events ──────────────────────────────────────────────────────────
 mainCanvas.addEventListener('mousedown', e => {
   if (!sourceImage) return;
@@ -326,8 +455,21 @@ mainCanvas.addEventListener('mousedown', e => {
   const ip = c2i(cp.x, cp.y);
 
   if (mode === 'select') {
-    const hit = hitTest(cp.x, cp.y);
-    selectAnnotation(hit ? hit.id : null);
+    const hit = hitTestWithPart(cp.x, cp.y);
+    if (e.shiftKey && hit) {
+      toggleSelectAnnotation(hit.ann.id);
+      return;
+    }
+    if (hit) {
+      selectAnnotation(hit.ann.id);
+      dragTarget     = hit.ann;
+      dragPart       = hit.part;
+      dragStart      = { canvasX: cp.x, canvasY: cp.y };
+      dragOrigCoords = JSON.parse(JSON.stringify(hit.ann.coords));
+      dragMoved      = false;
+    } else {
+      selectAnnotation(null);
+    }
     return;
   }
 
@@ -370,6 +512,37 @@ mainCanvas.addEventListener('mousemove', e => {
 
   if (spaceHeld) mainCanvas.style.cursor = 'grab';
 
+  // Drag-move annotation
+  if (dragTarget && dragStart) {
+    const dx = cp.x - dragStart.canvasX;
+    const dy = cp.y - dragStart.canvasY;
+    if (dragMoved || Math.hypot(dx, dy) >= 2) {
+      if (!dragMoved) { pushUndo(); dragMoved = true; }
+      const idx = dx / scale, idy = dy / scale;
+      const orig = dragOrigCoords, ann = dragTarget;
+      if (ann.type === 'point') {
+        ann.coords = [orig[0] + idx, orig[1] + idy];
+      } else if (ann.type === 'line') {
+        if (dragPart === 'p1')
+          ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [...orig[1]]];
+        else if (dragPart === 'p2')
+          ann.coords = [[...orig[0]], [orig[1][0]+idx, orig[1][1]+idy]];
+        else
+          ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [orig[1][0]+idx, orig[1][1]+idy]];
+      } else if (ann.type === 'rect') {
+        if (dragPart === 'p1')
+          ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [...orig[1]]];
+        else if (dragPart === 'p2')
+          ann.coords = [[...orig[0]], [orig[1][0]+idx, orig[1][1]+idy]];
+        else
+          ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [orig[1][0]+idx, orig[1][1]+idy]];
+      }
+      const isResizing = dragTarget.type === 'rect' && (dragPart === 'p1' || dragPart === 'p2');
+      mainCanvas.style.cursor = isResizing ? 'nwse-resize' : 'move';
+      redraw();
+    }
+  }
+
   if (sourceImage) {
     const ip = c2i(cp.x, cp.y);
     updateCoordsHud(ip.x, ip.y);
@@ -377,6 +550,14 @@ mainCanvas.addEventListener('mousemove', e => {
   }
 
   if (dragging || lineP1) redraw();
+
+  // Hover cursor: resize for rect corners, move for everything else hittable
+  if (mode === 'select' && !dragTarget && !isPanning && !spaceHeld && sourceImage) {
+    const h = hitTestWithPart(cp.x, cp.y);
+    mainCanvas.style.cursor = !h ? 'default'
+      : (h.ann.type === 'rect' && (h.part === 'p1' || h.part === 'p2')) ? 'nwse-resize'
+      : 'move';
+  }
 });
 
 mainCanvas.addEventListener('mouseup', e => {
@@ -384,6 +565,14 @@ mainCanvas.addEventListener('mouseup', e => {
     isPanning = false;
     panStart  = null;
     mainCanvas.style.cursor = spaceHeld ? 'grab' : (mode === 'select' ? 'default' : 'crosshair');
+    return;
+  }
+
+  if (dragTarget) {
+    if (dragMoved) refreshList();
+    dragTarget = dragPart = dragStart = dragOrigCoords = null;
+    dragMoved  = false;
+    mainCanvas.style.cursor = 'default';
     return;
   }
 
@@ -407,6 +596,10 @@ mainCanvas.addEventListener('mouseleave', () => {
   updateCoordsHud(null, null);
   updateZoom(null, null);
   if (dragging || lineP1) redraw();
+  // Cancel drag if it hadn't moved yet (moved=true means undo already pushed — keep state)
+  if (dragTarget && !dragMoved) {
+    dragTarget = dragPart = dragStart = dragOrigCoords = null;
+  }
 });
 
 mainCanvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -415,35 +608,13 @@ let wheelRafId = null;
 mainCanvas.addEventListener('wheel', e => {
   e.preventDefault();
   if (!sourceImage) return;
-
-  const factor   = e.deltaY < 0 ? 1.05 : 1 / 1.05;
-  const newScale = Math.max(minScale, Math.min(4, scale * factor));
-  if (newScale === scale) return;
-
-  // Image point under the cursor (in image px)
-  const canvasRect  = mainCanvas.getBoundingClientRect();
-  const mouseCanvasX = e.clientX - canvasRect.left;
-  const mouseCanvasY = e.clientY - canvasRect.top;
-  const imgX = mouseCanvasX / scale;
-  const imgY = mouseCanvasY / scale;
-
-  scale = newScale;
-  mainCanvas.width  = Math.round(imgW * scale);
-  mainCanvas.height = Math.round(imgH * scale);
-  updateCanvasPadding();
-
-  // Scroll so the image point under the cursor stays fixed.
-  // updateCanvasPadding() sets canvasWrap's margin, so offsetLeft/offsetTop
-  // are the exact scroll-space offsets — no estimation needed.
-  const areaRect = canvasArea.getBoundingClientRect();
-  canvasArea.scrollLeft = canvasWrap.offsetLeft + imgX * scale - (e.clientX - areaRect.left);
-  canvasArea.scrollTop  = canvasWrap.offsetTop  + imgY * scale - (e.clientY - areaRect.top);
-  updateCoordsHud(imgX, imgY);
-
   // Batch redraws to one per animation frame so rapid wheel events don't
   // queue multiple expensive drawImage+annotation passes.
   if (wheelRafId) cancelAnimationFrame(wheelRafId);
-  wheelRafId = requestAnimationFrame(() => { wheelRafId = null; redraw(); });
+  wheelRafId = requestAnimationFrame(() => {
+    wheelRafId = null;
+    zoomBy(e.deltaY < 0 ? 1.05 : 1 / 1.05, e.clientX, e.clientY);
+  });
 }, { passive: false });
 
 // ── Main canvas render ─────────────────────────────────────────────────────
@@ -453,7 +624,9 @@ function redraw() {
   mainCtx.drawImage(sourceImage, 0, 0, mainCanvas.width, mainCanvas.height);
 
   for (const ann of annotations) {
-    drawAnnotation(mainCtx, ann, annotationColor(ann), showLabels, ann.id === selectedId);
+    if (!isAnnotationVisible(ann)) continue;
+    const isSel = ann.id === selectedId || selectedIds.has(ann.id);
+    drawAnnotation(mainCtx, ann, annotationColor(ann), showLabels, isSel);
   }
 
   // In-progress previews
@@ -499,16 +672,17 @@ function annotationColor(ann) {
     const tag = tags.find(t => t.id === ann.tags[0]);
     if (tag) base = tag.color;
   }
-  return ann.id === selectedId ? mixWithWhite(base, 0.55) : base;
+  const isSelected = ann.id === selectedId || selectedIds.has(ann.id);
+  return isSelected ? mixWithWhite(base, 0.55) : base;
 }
 
-function drawAnnotation(ctx, ann, color, showLabel, selected = false) {
+function drawAnnotation(ctx, ann, color, showLabel, selected = false, labelSize = 11.5) {
   ctx.save();
   const lw = selected ? 3 : 2;
   if (ann.type === 'point') {
     const p = i2c(ann.coords[0], ann.coords[1]);
     paintDot(ctx, p.x, p.y, color, selected ? 6 : 5);
-    if (showLabel) paintLabel(ctx, ann.name, p.x + 9, p.y - 6, color);
+    if (showLabel) paintLabel(ctx, ann.name, p.x + 9, p.y - 6, color, labelSize);
 
   } else if (ann.type === 'line') {
     const p1 = i2c(ann.coords[0][0], ann.coords[0][1]);
@@ -518,7 +692,7 @@ function drawAnnotation(ctx, ann, color, showLabel, selected = false) {
     ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
     paintDot(ctx, p1.x, p1.y, color, selected ? 5 : 4);
     paintDot(ctx, p2.x, p2.y, color, selected ? 5 : 4);
-    if (showLabel) paintLabel(ctx, ann.name, (p1.x+p2.x)/2 + 6, (p1.y+p2.y)/2 - 6, color);
+    if (showLabel) paintLabel(ctx, ann.name, (p1.x+p2.x)/2 + 6, (p1.y+p2.y)/2 - 6, color, labelSize);
 
   } else if (ann.type === 'rect') {
     const p1 = i2c(ann.coords[0][0], ann.coords[0][1]);
@@ -528,7 +702,7 @@ function drawAnnotation(ctx, ann, color, showLabel, selected = false) {
     ctx.strokeRect(p1.x, p1.y, p2.x-p1.x, p2.y-p1.y);
     paintDot(ctx, p1.x, p1.y, color, selected ? 5 : 4);
     paintDot(ctx, p2.x, p2.y, color, selected ? 5 : 4);
-    if (showLabel) paintLabel(ctx, ann.name, p1.x + 5, p1.y - 6, color);
+    if (showLabel) paintLabel(ctx, ann.name, p1.x + 5, p1.y - 6, color, labelSize);
   }
   ctx.restore();
 }
@@ -544,12 +718,12 @@ function paintDot(ctx, x, y, color, r) {
   ctx.restore();
 }
 
-function paintLabel(ctx, text, x, y, color) {
+function paintLabel(ctx, text, x, y, color, fontSize = 11.5) {
   ctx.save();
-  ctx.font = '11.5px -apple-system, system-ui, sans-serif';
+  ctx.font = `${fontSize}px -apple-system, system-ui, sans-serif`;
   const w = ctx.measureText(text).width;
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillRect(x - 2, y - 11, w + 6, 14);
+  ctx.fillRect(x - 2, y - fontSize, w + 6, fontSize * 1.3);
   ctx.fillStyle = color;
   ctx.fillText(text, x + 1, y);
   ctx.restore();
@@ -584,8 +758,9 @@ function updateZoom(cx, cy) {
   });
 
   for (const ann of annotations) {
+    if (!isAnnotationVisible(ann)) continue;
     const color = annotationColor(ann);
-    const sel   = ann.id === selectedId;
+    const sel   = ann.id === selectedId || selectedIds.has(ann.id);
     zoomCtx.save();
 
     if (ann.type === 'point') {
@@ -632,11 +807,11 @@ function updateZoom(cx, cy) {
 
 // ── Annotation list ────────────────────────────────────────────────────────
 const TYPE_ICONS = {
-  point: `<svg class="ann-type-icon" viewBox="0 0 24 24" fill="#f6e05e" xmlns="http://www.w3.org/2000/svg">
+  point: `<svg class="ann-type-icon" viewBox="0 0 24 24" fill="#94a3b8" xmlns="http://www.w3.org/2000/svg">
     <circle cx="12" cy="12" r="6"/></svg>`,
-  line: `<svg class="ann-type-icon" viewBox="0 0 24 24" fill="none" stroke="#f6e05e" stroke-width="2.5"
+  line: `<svg class="ann-type-icon" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.5"
     stroke-linecap="round" xmlns="http://www.w3.org/2000/svg"><line x1="4" y1="20" x2="20" y2="4"/></svg>`,
-  rect: `<svg class="ann-type-icon" viewBox="0 0 24 24" fill="none" stroke="#f6e05e" stroke-width="2"
+  rect: `<svg class="ann-type-icon" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2"
     xmlns="http://www.w3.org/2000/svg"><rect x="3" y="5" width="18" height="14" rx="1.5"/></svg>`,
 };
 
@@ -657,7 +832,9 @@ function refreshList() {
   for (const ann of annotations) {
     const isExpanded = ann.id === expandedAnnotationId;
     const item = document.createElement('div');
-    item.className = 'ann-item' + (ann.id === selectedId ? ' selected' : '');
+    item.className = 'ann-item'
+      + (selectedIds.has(ann.id) ? ' selected' : '')
+      + (!isAnnotationVisible(ann) ? ' ann-hidden' : '');
     item.dataset.id = ann.id;
     item.innerHTML = `
       ${TYPE_ICONS[ann.type] || ''}
@@ -762,8 +939,9 @@ function clearAnnotations() {
   if (annotations.length === 0) return;
   if (!confirm(`Remove all ${annotations.length} annotation${annotations.length > 1 ? 's' : ''}?`)) return;
   pushUndo();
-  annotations = [];
-  selectedId  = null;
+  annotations  = [];
+  selectedId   = null;
+  selectedIds  = new Set();
   expandedAnnotationId = null;
   refreshList();
   redraw();
@@ -771,18 +949,34 @@ function clearAnnotations() {
 
 // ── Tags ───────────────────────────────────────────────────────────────────
 function refreshTagsList() {
+  // Build annotation count per tag
+  const countMap = {};
+  for (const tag of tags) countMap[tag.id] = 0;
+  for (const ann of annotations)
+    for (const tid of (ann.tags || []))
+      if (tid in countMap) countMap[tid]++;
+
   tagsList.innerHTML = '';
   for (const tag of tags) {
+    const isHidden = hiddenTagIds.has(tag.id);
     const item = document.createElement('div');
     item.className = 'tag-item' + (activeTags.has(tag.id) ? ' active' : '');
     item.dataset.id = tag.id;
     item.innerHTML = `
-      <span class="tag-dot" style="background:${sanitizeHexColor(tag.color)}"></span>
+      <button class="tag-dot tag-dot-btn" style="background:${sanitizeHexColor(tag.color)}" title="Change color"></button>
       <span class="tag-name">${esc(tag.name)}</span>
+      ${countMap[tag.id] > 0 ? `<span class="tag-count">${countMap[tag.id]}</span>` : ''}
+      <button class="tag-eye-btn${isHidden ? ' hidden-tag' : ''}" title="Toggle visibility">
+        ${isHidden
+          ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`
+          : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`}
+      </button>
       <button class="tag-del-btn" title="Delete tag">×</button>
     `;
     item.addEventListener('click', e => {
-      if (e.target.classList.contains('tag-del-btn')) return;
+      if (e.target.closest('.tag-del-btn')) return;
+      if (e.target.closest('.tag-eye-btn')) return;
+      if (e.target.closest('.tag-dot-btn')) return;
       const ids = tags.map(t => t.id);
       if (e.shiftKey && tagAnchorId) {
         // Range: select from anchor to here, replacing current selection
@@ -802,6 +996,16 @@ function refreshTagsList() {
       }
       refreshTagsList();
     });
+    item.querySelector('.tag-eye-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      if (hiddenTagIds.has(tag.id)) hiddenTagIds.delete(tag.id);
+      else hiddenTagIds.add(tag.id);
+      refreshTagsList(); refreshList(); redraw();
+    });
+    item.querySelector('.tag-dot-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      openColorPicker(tag, e.currentTarget);
+    });
     item.querySelector('.tag-del-btn').addEventListener('click', e => {
       e.stopPropagation();
       deleteTag(tag.id);
@@ -815,12 +1019,64 @@ function deleteTag(id) {
   pushUndo();
   tags = tags.filter(t => t.id !== id);
   activeTags.delete(id);
+  hiddenTagIds.delete(id);
   if (tagAnchorId === id) tagAnchorId = null;
   for (const ann of annotations) {
     if (ann.tags) ann.tags = ann.tags.filter(tid => tid !== id);
   }
   refreshTagsList();
   refreshList();
+}
+
+/** Open the color picker popover anchored to the given element. */
+function openColorPicker(tag, anchorEl) {
+  closeColorPicker();
+  const popover = document.createElement('div');
+  popover.className = 'color-picker-popover';
+  popover.innerHTML = `
+    <div class="color-swatches">
+      ${TAG_COLORS.map(c => `<button class="color-swatch${sanitizeHexColor(tag.color) === c ? ' active' : ''}"
+        style="background:${c}" data-color="${c}" title="${c}"></button>`).join('')}
+    </div>
+    <div class="color-custom-row">
+      <input type="color" class="color-native-input" value="${sanitizeHexColor(tag.color)}" title="Custom color">
+      <span class="color-custom-label">Custom</span>
+    </div>
+  `;
+  document.body.appendChild(popover);
+  colorPickerPopover = popover;
+
+  // Position near the anchor element
+  const rect = anchorEl.getBoundingClientRect();
+  popover.style.position = 'fixed';
+  popover.style.top  = `${rect.bottom + 6}px`;
+  popover.style.left = `${rect.left}px`;
+  // Clamp to viewport on next frame (needs layout)
+  requestAnimationFrame(() => {
+    const pw = popover.offsetWidth;
+    const maxLeft = window.innerWidth - pw - 8;
+    if (popover.offsetLeft > maxLeft) popover.style.left = `${maxLeft}px`;
+  });
+
+  const applyColor = color => {
+    pushUndo();
+    tag.color = sanitizeHexColor(color, tag.color);
+    refreshTagsList(); refreshList(); redraw();
+    closeColorPicker();
+  };
+
+  popover.querySelectorAll('.color-swatch').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); applyColor(btn.dataset.color); });
+  });
+  popover.querySelector('.color-native-input').addEventListener('change', e => {
+    e.stopPropagation(); applyColor(e.target.value);
+  });
+  popover.addEventListener('click', e => e.stopPropagation());
+}
+
+/** Close and remove the color picker popover. */
+function closeColorPicker() {
+  if (colorPickerPopover) { colorPickerPopover.remove(); colorPickerPopover = null; }
 }
 
 function startAddTag() {
@@ -879,6 +1135,34 @@ function downloadJSON() {
   a.download = `${imageBaseName}_annotations.json`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** Export the image with annotations drawn at full (original) resolution. */
+function downloadAnnotatedImage() {
+  if (!sourceImage) return;
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width  = imgW;
+  offCanvas.height = imgH;
+  const offCtx = offCanvas.getContext('2d');
+  offCtx.drawImage(sourceImage, 0, 0, imgW, imgH);
+  // Temporarily set scale=1 so i2c() becomes identity (image coords = canvas coords)
+  // Font size proportional to image width so labels are readable at full resolution
+  const labelSize = Math.max(16, Math.round(imgW / 80));
+  const savedScale = scale;
+  try {
+    scale = 1;
+    for (const ann of annotations) {
+      if (!isAnnotationVisible(ann)) continue;
+      const isSel = ann.id === selectedId || selectedIds.has(ann.id);
+      drawAnnotation(offCtx, ann, annotationColor(ann), showLabels, isSel, labelSize);
+    }
+  } finally { scale = savedScale; }
+  offCanvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${imageBaseName}_annotated.png`;
+    a.click(); URL.revokeObjectURL(url);
+  }, 'image/png');
 }
 
 function importJSONFile(file) {
@@ -974,7 +1258,20 @@ document.addEventListener('keydown', e => {
   if (k === 'r') { setMode('rect');   return; }
   if (k === 'f') { fitToView(); return; }
   if (k === 'm') { showLabels = !showLabels; redraw(); return; }
-  if ((e.metaKey || e.ctrlKey) && k === 'z') { e.preventDefault(); undo(); return; }
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && k === 'z') { e.preventDefault(); undo(); return; }
+  if ((e.metaKey || e.ctrlKey) && (k === 'y' || (e.shiftKey && k === 'z'))) {
+    e.preventDefault(); redo(); return;
+  }
+  if (e.key === '+' || e.key === '=') {
+    e.preventDefault();
+    const r = canvasArea.getBoundingClientRect();
+    zoomBy(1.25, r.left + r.width / 2, r.top + r.height / 2); return;
+  }
+  if (e.key === '-') {
+    e.preventDefault();
+    const r = canvasArea.getBoundingClientRect();
+    zoomBy(1 / 1.25, r.left + r.width / 2, r.top + r.height / 2); return;
+  }
   if (e.key === 'Tab') {
     e.preventDefault();
     if (annotations.length === 0) return;
@@ -985,15 +1282,20 @@ document.addEventListener('keydown', e => {
     selectAnnotation(annotations[next].id);
     return;
   }
-  if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
-    deleteAnnotation(selectedId);
-    return;
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.size > 0) {
+    pushUndo();
+    const toDelete = new Set(selectedIds);
+    annotations = annotations.filter(a => !toDelete.has(a.id));
+    if (toDelete.has(expandedAnnotationId)) expandedAnnotationId = null;
+    selectedId  = null;
+    selectedIds = new Set();
+    refreshList(); redraw(); return;
   }
   if (e.key === 'Escape') {
     if (lineP1 || dragging) {
       lineP1 = null; rectP1 = null; dragging = false;
       redraw();
-    } else if (selectedId) {
+    } else if (selectedId || selectedIds.size > 0) {
       selectAnnotation(null);
     } else {
       setMode('select');
@@ -1095,7 +1397,7 @@ function closeFileMenu() {
   document.getElementById('file-dropdown').classList.remove('open');
 }
 
-document.addEventListener('click', () => { closeToolsMenu(); closeFileMenu(); });
+document.addEventListener('click', () => { closeToolsMenu(); closeFileMenu(); closeColorPicker(); });
 
 function openToolDialog(toolName) {
   closeToolsMenu();
