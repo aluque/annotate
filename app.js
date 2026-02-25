@@ -734,6 +734,9 @@ mainCanvas.addEventListener('touchmove', e => {
     const touch = e.touches[0];
     const cp = getCanvasPos(touch);
     mouseCanvas = cp;
+    const ip = c2i(cp.x, cp.y);
+    updateCoordsHud(ip.x, ip.y);
+    updateZoom(cp.x, cp.y);
 
     if (dragTarget && dragStart) {
       const dx = cp.x - dragStart.canvasX;
