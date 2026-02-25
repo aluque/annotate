@@ -604,19 +604,34 @@ mainCanvas.addEventListener('mouseleave', () => {
 
 mainCanvas.addEventListener('contextmenu', e => e.preventDefault());
 
-let wheelRafId = null;
+// Wheel zoom: accumulate delta across all events in the same animation frame
+// so that zoom is proportional to scroll intensity rather than event count.
+// This prevents the Magic Mouse (which fires many small events) from feeling
+// over-sensitive — a light touch produces a small zoom, a deliberate scroll
+// produces a larger one.
+let wheelAccum  = 0;   // accumulated normalised pixel delta
+let wheelPivotX = 0;
+let wheelPivotY = 0;
+let wheelRafId  = null;
 mainCanvas.addEventListener('wheel', e => {
   e.preventDefault();
   if (!sourceImage) return;
-  // Ignore lateral-dominant gestures (Magic Mouse horizontal swipes have
-  // deltaY ≈ 0, which would otherwise trigger spurious zoom-out).
+  // Ignore lateral-dominant gestures (Magic Mouse horizontal swipes).
   if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
-  // Batch redraws to one per animation frame so rapid wheel events don't
-  // queue multiple expensive drawImage+annotation passes.
-  if (wheelRafId) cancelAnimationFrame(wheelRafId);
+  // Normalise to pixels regardless of deltaMode.
+  let delta = e.deltaY;
+  if (e.deltaMode === 1) delta *= 30;   // line  → ~pixels
+  if (e.deltaMode === 2) delta *= 300;  // page  → ~pixels
+  wheelAccum  += delta;
+  wheelPivotX  = e.clientX;
+  wheelPivotY  = e.clientY;
+  if (wheelRafId) return; // already scheduled for this frame
   wheelRafId = requestAnimationFrame(() => {
     wheelRafId = null;
-    zoomBy(e.deltaY < 0 ? 1.05 : 1 / 1.05, e.clientX, e.clientY);
+    // 0.9995^N: 100 px → ~5 %, 20 px → ~1 %, 5 px → ~0.25 %
+    const factor = Math.pow(0.9995, wheelAccum);
+    wheelAccum = 0;
+    zoomBy(factor, wheelPivotX, wheelPivotY);
   });
 }, { passive: false });
 
