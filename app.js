@@ -608,6 +608,9 @@ let wheelRafId = null;
 mainCanvas.addEventListener('wheel', e => {
   e.preventDefault();
   if (!sourceImage) return;
+  // Ignore lateral-dominant gestures (Magic Mouse horizontal swipes have
+  // deltaY ≈ 0, which would otherwise trigger spurious zoom-out).
+  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
   // Batch redraws to one per animation frame so rapid wheel events don't
   // queue multiple expensive drawImage+annotation passes.
   if (wheelRafId) cancelAnimationFrame(wheelRafId);
