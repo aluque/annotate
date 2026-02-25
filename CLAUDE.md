@@ -8,7 +8,7 @@ A browser-based image annotation tool. Users open an image, place geometric anno
 
 ```
 index.html   – DOM layout (toolbar, sidebar, canvas area, status bar)
-app.js       – All application logic (~1820 lines, single file)
+app.js       – All application logic (~2060 lines, single file)
 style.css    – Styling; dark theme by default, light theme via body.light
 launch.sh    – macOS helper that opens the app in a browser (tries Safari → Chrome → Chromium → Firefox)
 scripts/     – Standalone Python CLI tools (extract.py, measure.py); superseded in-browser by the Tools menu
@@ -54,6 +54,10 @@ Coords HUD           – fixed bottom-right (position:fixed, above status bar); 
 | `dragStart` | `{canvasX, canvasY}` at mousedown |
 | `dragOrigCoords` | Deep-copy of `dragTarget.coords` at drag start |
 | `dragMoved` | Whether the drag has moved past the 2px threshold (used to gate `pushUndo()`) |
+| `touchIsPinching` | True while two fingers are on the canvas |
+| `touchPinchDist0` | Finger distance at pinch start |
+| `touchPinchScale0` | `scale` value at pinch start |
+| `touchPinchImgAnchor` | Image coords under the finger midpoint at pinch start |
 
 ### Coordinate system
 
@@ -131,11 +135,12 @@ Tags are serialized by name (not by ID) in the export.
 - **Zoom**: mouse wheel (proportional accumulation via RAF; lateral-axis events ignored for Magic Mouse compatibility)
 - **Zoom keyboard shortcuts**: `+` / `=` zoom in, `-` zoom out — both zoom around the viewport center
 - **Fit to view**: `F` key — resets scale and scroll to fit the image in the viewport
-- **Shift held during line/rect drawing**: constrains to horizontal or vertical
+- **Line and rect drawing**: both use press-and-drag (mousedown/touchstart = P1, mouseup/touchend = P2); line is discarded if total distance ≤ 2 image px, rect if either dimension ≤ 2 px
+- **Shift held during line/rect drawing**: constrains to horizontal or vertical (desktop only)
 - **Auto-naming**: `<prefix><counter padded to 3 digits>`. Prefix defaults per type (`Point`, `Line`, `Rectangle`) but the toolbar input overrides all three.
 - **Tag selection for new annotations**: click tag in sidebar to toggle; Shift+click for range; Cmd/Ctrl+click for single toggle
 - **Drag-and-drop**: canvas-area accepts both image files and JSON files
-- **Drag-to-move**: in select mode, drag a selected annotation to move it; for lines, dragging an endpoint (p1/p2) moves only that endpoint; for rects, dragging a corner (p1/p2) resizes it; `pushUndo()` fires on first pixel moved (2px threshold)
+- **Drag-to-move**: in select mode, drag a selected annotation to move it; for lines, dragging an endpoint (p1/p2) moves only that endpoint; for rects, dragging a corner (p1/p2) resizes it. **Handles** (point, line endpoint, rect corner) snap immediately to the cursor/finger at drag-start — `pushUndo()` fires at that moment and `dragMoved` is set to `true`. Whole-body line/rect drags preserve the grab offset and push undo on the first 2 px of movement.
 - **Multi-select**: Shift+click on canvas toggles annotations in/out of `selectedIds`; Del/Backspace deletes all selected in one undo entry
 - **Hide by tag**: eye icon in the tag sidebar row; hidden tag's annotations disappear from canvas and are dimmed in the sidebar list
 - **Keyboard shortcuts**: S / P / L / R (tools), Del/Backspace (delete selected), Esc (cancel in-progress), F (fit), M (toggle labels), Tab / Shift+Tab (cycle annotations), Cmd/Ctrl+Z (undo), Cmd+Y or Cmd+Shift+Z (redo), +/- (zoom)
@@ -212,7 +217,7 @@ Output filename: `<imageBaseName>_annotated.png`.
 
 ## CSS themes
 
-Dark is default (`:root` variables). Light theme adds `body.light` and overrides the same custom properties. `color-mix()` is used for some derived values. The dot-grid background uses `--bg3` (`#2d3748`) in dark theme and `#c8cdd6` in light theme.
+Dark is default (`:root` variables). Light theme adds `body.light` and overrides the same custom properties. `color-mix()` is used for some derived values. The dot-grid background uses `--bg3` (`#2d3748`) in dark theme and `#c8cdd6` in light theme. `body` uses `height: 100dvh` (not `100vh`) so iOS Safari's browser chrome does not clip the status bar.
 
 ### CSS classes added for new features
 
@@ -230,6 +235,34 @@ Dark is default (`:root` variables). Light theme adds `body.light` and overrides
 | `.color-native-input` | The `<input type="color">` element |
 | `.color-custom-label` | Label next to native color input |
 | `.ann-item.ann-hidden` | Dimmed sidebar row for hidden annotations |
+
+## Touch support (iPad / iOS)
+
+Enabled by four event listeners on `mainCanvas` (`touchstart`, `touchmove`, `touchend`, `touchcancel`), all `{ passive: false }`. Desktop mouse handlers are not modified.
+
+### Prerequisites in HTML/CSS
+- Viewport meta: `user-scalable=no` — prevents Safari intercepting pinch at the browser level
+- `#main-canvas { touch-action: none }` — required for `e.preventDefault()` to suppress default scroll/zoom
+
+### Gesture model
+
+| Gesture | Behaviour |
+|---|---|
+| 1-finger tap (point mode) | Place point |
+| 1-finger tap (line mode) | Press = P1, release = P2 (drag to draw) |
+| 1-finger drag (rect mode) | Press = P1, release = P2 |
+| 1-finger tap/drag (select mode) | Tap = select/deselect; drag = move annotation |
+| 2-finger pinch | Zoom around finger midpoint |
+| 2-finger slide | Pan |
+| 2-finger pinch + slide | Simultaneous zoom + pan |
+
+### Implementation notes
+- Pinch zoom replicates `zoomBy()` logic: computes new scale from finger-distance ratio, then adjusts `scrollLeft/scrollTop` to keep `touchPinchImgAnchor` under the moving midpoint.
+- A second finger landing cancels any in-progress single-finger line/rect draw.
+- `touchmove` calls `updateZoom()` and `updateCoordsHud()` so the zoom viewer tracks the finger during drags.
+- No Shift-constrain on touch (no keyboard); lines and rects are always unconstrained.
+
+---
 
 ## Tools menu (top-right toolbar)
 
