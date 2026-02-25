@@ -54,6 +54,7 @@ const TAG_COLORS = [
   '#fb923c', '#34d399', '#a78bfa', '#f472b6',
 ];
 let tags               = [];   // [{id, name, color}]
+let tagById            = new Map(); // id → tag; rebuilt in refreshTagsList()
 let activeTags         = new Set(); // IDs of tags applied to the next new annotation
 let hiddenTagIds       = new Set(); // IDs of tags whose annotations are hidden
 let tagAnchorId        = null;     // anchor for shift-click range selection
@@ -76,8 +77,11 @@ const annList    = document.getElementById('annotation-list');
 const tagsList   = document.getElementById('tags-list');
 const coordsHud  = document.getElementById('coords-hud');
 const dropZone   = document.getElementById('drop-zone');
-const canvasWrap = document.getElementById('canvas-wrapper');
-const canvasArea = document.getElementById('canvas-area');
+const canvasWrap   = document.getElementById('canvas-wrapper');
+const canvasArea   = document.getElementById('canvas-area');
+const prefixInput  = document.getElementById('prefix-input');
+const zoomPanel    = document.getElementById('zoom-panel');
+const annCount     = document.getElementById('ann-count');
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 function uid() { return crypto.randomUUID(); }
@@ -87,7 +91,7 @@ const DEFAULT_PREFIX = { point: 'Point', line: 'Line', rect: 'Rectangle' };
 function nextName(type) {
   counters[type]++;
   const n      = String(counters[type]).padStart(3, '0');
-  const prefix = document.getElementById('prefix-input').value.trim() || DEFAULT_PREFIX[type];
+  const prefix = prefixInput.value.trim() || DEFAULT_PREFIX[type];
   return `${prefix}${n}`;
 }
 
@@ -213,7 +217,7 @@ function setMode(m) {
   document.getElementById('status-mode').textContent = modeLabel;
 
   if (DEFAULT_PREFIX[m]) {
-    document.getElementById('prefix-input').value = DEFAULT_PREFIX[m];
+    prefixInput.value = DEFAULT_PREFIX[m];
   }
 
   const hints = {
@@ -343,13 +347,17 @@ function deleteAnnotation(id) {
   redraw();
 }
 
+function updateSelectionClasses() {
+  annList.querySelectorAll('.ann-item').forEach(el => {
+    el.classList.toggle('selected', selectedIds.has(el.dataset.id));
+  });
+}
+
 function selectAnnotation(id) {
   selectedId  = id;
   selectedIds = new Set(id ? [id] : []);
   // Update classes in-place so a focused input isn't destroyed by a DOM rebuild
-  annList.querySelectorAll('.ann-item').forEach(el => {
-    el.classList.toggle('selected', selectedIds.has(el.dataset.id));
-  });
+  updateSelectionClasses();
   redraw();
   if (id) scrollToSelected();
 }
@@ -363,9 +371,7 @@ function toggleSelectAnnotation(id) {
     selectedIds.add(id);
     selectedId = id;
   }
-  annList.querySelectorAll('.ann-item').forEach(el => {
-    el.classList.toggle('selected', selectedIds.has(el.dataset.id));
-  });
+  updateSelectionClasses();
   redraw();
 }
 
@@ -511,6 +517,35 @@ mainCanvas.addEventListener('mousedown', e => {
   }
 });
 
+// ── Drag-move helper ───────────────────────────────────────────────────────
+function applyDragMove(cp) {
+  const dx = cp.x - dragStart.canvasX;
+  const dy = cp.y - dragStart.canvasY;
+  if (!dragMoved && Math.hypot(dx, dy) < 2) return false;
+  if (!dragMoved) { pushUndo(); dragMoved = true; }
+  const idx = dx / scale, idy = dy / scale;
+  const orig = dragOrigCoords, ann = dragTarget;
+  if (ann.type === 'point') {
+    ann.coords = [orig[0] + idx, orig[1] + idy];
+  } else if (ann.type === 'line') {
+    if (dragPart === 'p1')
+      ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [...orig[1]]];
+    else if (dragPart === 'p2')
+      ann.coords = [[...orig[0]], [orig[1][0]+idx, orig[1][1]+idy]];
+    else
+      ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [orig[1][0]+idx, orig[1][1]+idy]];
+  } else if (ann.type === 'rect') {
+    if (dragPart === 'p1')
+      ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [...orig[1]]];
+    else if (dragPart === 'p2')
+      ann.coords = [[...orig[0]], [orig[1][0]+idx, orig[1][1]+idy]];
+    else
+      ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [orig[1][0]+idx, orig[1][1]+idy]];
+  }
+  redraw();
+  return true;
+}
+
 mainCanvas.addEventListener('mousemove', e => {
   // Pan takes priority
   if (isPanning && panStart) {
@@ -527,32 +562,10 @@ mainCanvas.addEventListener('mousemove', e => {
 
   // Drag-move annotation
   if (dragTarget && dragStart) {
-    const dx = cp.x - dragStart.canvasX;
-    const dy = cp.y - dragStart.canvasY;
-    if (dragMoved || Math.hypot(dx, dy) >= 2) {
-      if (!dragMoved) { pushUndo(); dragMoved = true; }
-      const idx = dx / scale, idy = dy / scale;
-      const orig = dragOrigCoords, ann = dragTarget;
-      if (ann.type === 'point') {
-        ann.coords = [orig[0] + idx, orig[1] + idy];
-      } else if (ann.type === 'line') {
-        if (dragPart === 'p1')
-          ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [...orig[1]]];
-        else if (dragPart === 'p2')
-          ann.coords = [[...orig[0]], [orig[1][0]+idx, orig[1][1]+idy]];
-        else
-          ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [orig[1][0]+idx, orig[1][1]+idy]];
-      } else if (ann.type === 'rect') {
-        if (dragPart === 'p1')
-          ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [...orig[1]]];
-        else if (dragPart === 'p2')
-          ann.coords = [[...orig[0]], [orig[1][0]+idx, orig[1][1]+idy]];
-        else
-          ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [orig[1][0]+idx, orig[1][1]+idy]];
-      }
+    const moved = applyDragMove(cp);
+    if (moved) {
       const isResizing = dragTarget.type === 'rect' && (dragPart === 'p1' || dragPart === 'p2');
       mainCanvas.style.cursor = isResizing ? 'nwse-resize' : 'move';
-      redraw();
     }
   }
 
@@ -764,35 +777,7 @@ mainCanvas.addEventListener('touchmove', e => {
     updateCoordsHud(ip.x, ip.y);
     updateZoom(cp.x, cp.y);
 
-    if (dragTarget && dragStart) {
-      const dx = cp.x - dragStart.canvasX;
-      const dy = cp.y - dragStart.canvasY;
-      if (dragMoved || Math.hypot(dx, dy) >= 2) {
-        if (!dragMoved) { pushUndo(); dragMoved = true; }
-        const idx = dx / scale, idy = dy / scale;
-        const orig = dragOrigCoords, ann = dragTarget;
-        if (ann.type === 'point') {
-          ann.coords = [orig[0] + idx, orig[1] + idy];
-        } else if (ann.type === 'line') {
-          if (dragPart === 'p1')
-            ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [...orig[1]]];
-          else if (dragPart === 'p2')
-            ann.coords = [[...orig[0]], [orig[1][0]+idx, orig[1][1]+idy]];
-          else
-            ann.coords = [[orig[0][0]+idx, orig[0][1]+idy],
-                          [orig[1][0]+idx, orig[1][1]+idy]];
-        } else if (ann.type === 'rect') {
-          if (dragPart === 'p1')
-            ann.coords = [[orig[0][0]+idx, orig[0][1]+idy], [...orig[1]]];
-          else if (dragPart === 'p2')
-            ann.coords = [[...orig[0]], [orig[1][0]+idx, orig[1][1]+idy]];
-          else
-            ann.coords = [[orig[0][0]+idx, orig[0][1]+idy],
-                          [orig[1][0]+idx, orig[1][1]+idy]];
-        }
-        redraw();
-      }
-    }
+    if (dragTarget && dragStart) applyDragMove(cp);
 
     if (dragging || lineP1) redraw();
   }
@@ -920,7 +905,7 @@ function redraw() {
 function annotationColor(ann) {
   let base = C_NORMAL;
   if (ann.tags && ann.tags.length > 0) {
-    const tag = tags.find(t => t.id === ann.tags[0]);
+    const tag = tagById.get(ann.tags[0]);
     if (tag) base = tag.color;
   }
   const isSelected = ann.id === selectedId || selectedIds.has(ann.id);
@@ -982,7 +967,6 @@ function paintLabel(ctx, text, x, y, color, fontSize = 11.5) {
 
 // ── Zoom viewer ────────────────────────────────────────────────────────────
 function updateZoom(cx, cy) {
-  const zoomPanel = document.getElementById('zoom-panel');
   const zw = zoomPanel.clientWidth - 16;
   const zh = 148;
   zoomCanvas.width  = zw;
@@ -1069,7 +1053,7 @@ const TYPE_ICONS = {
 function getTagDots(annTagIds) {
   if (!annTagIds || annTagIds.length === 0) return '';
   const dots = annTagIds
-    .map(id => tags.find(t => t.id === id))
+    .map(id => tagById.get(id))
     .filter(Boolean)
     .map(t => `<span class="ann-tag-dot" style="background:${sanitizeHexColor(t.color)}" title="${esc(t.name)}"></span>`)
     .join('');
@@ -1077,7 +1061,7 @@ function getTagDots(annTagIds) {
 }
 
 function refreshList() {
-  document.getElementById('ann-count').textContent = annotations.length;
+  annCount.textContent = annotations.length;
   annList.innerHTML = '';
 
   for (const ann of annotations) {
@@ -1200,6 +1184,8 @@ function clearAnnotations() {
 
 // ── Tags ───────────────────────────────────────────────────────────────────
 function refreshTagsList() {
+  tagById = new Map(tags.map(t => [t.id, t]));
+
   // Build annotation count per tag
   const countMap = {};
   for (const tag of tags) countMap[tag.id] = 0;
@@ -1376,7 +1362,7 @@ function downloadJSON() {
       type:   a.type,
       name:   a.name,
       coords: a.coords,
-      tags:   (a.tags || []).map(id => tags.find(t => t.id === id)?.name).filter(Boolean),
+      tags:   (a.tags || []).map(id => tagById.get(id)?.name).filter(Boolean),
     })),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
