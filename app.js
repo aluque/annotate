@@ -71,6 +71,10 @@ let colorPickerPopover = null;
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const mainCanvas = document.getElementById('main-canvas');
 const mainCtx    = mainCanvas.getContext('2d');
+// 1×1 offscreen canvas used to sample raw image pixels (without annotations)
+const sampCanvas = document.createElement('canvas');
+sampCanvas.width = sampCanvas.height = 1;
+const sampCtx = sampCanvas.getContext('2d');
 const zoomCanvas = document.getElementById('zoom-canvas');
 const zoomCtx    = zoomCanvas.getContext('2d');
 const annList    = document.getElementById('annotation-list');
@@ -312,9 +316,10 @@ function updateCoordsHud(ix, iy) {
 
   let pixelLine = '';
   try {
-    const cx = Math.max(0, Math.min(mainCanvas.width  - 1, Math.round(ix * scale)));
-    const cy = Math.max(0, Math.min(mainCanvas.height - 1, Math.round(iy * scale)));
-    const px = mainCtx.getImageData(cx, cy, 1, 1).data;
+    const sx = Math.max(0, Math.min(sourceImage.naturalWidth  - 1, Math.round(ix)));
+    const sy = Math.max(0, Math.min(sourceImage.naturalHeight - 1, Math.round(iy)));
+    sampCtx.drawImage(sourceImage, -sx, -sy);
+    const px = sampCtx.getImageData(0, 0, 1, 1).data;
     const lum = 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2];
     const fmt = v => (v / 255).toFixed(3);
     pixelLine = `R:${fmt(px[0])}  G:${fmt(px[1])}  B:${fmt(px[2])}  L:${fmt(lum)}`;
